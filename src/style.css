@@ -779,3 +779,33 @@ button.primary:disabled {
   color: var(--fg);
   background: var(--stage-bg);
 }
+
+/* Phase 6 polish ---------------------------------------------------------- */
+
+.file-row {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+}
+
+.file-row button {
+  font-size: 12px;
+}
+
+.hint.error {
+  color: #f87171;
+}
+
+.stage-toolbar {
+  flex-wrap: wrap;
+  max-width: calc(100% - 24px);
+}
+
+@media (max-width: 900px) {
+  .stage-table {
+    padding-top: 100px;
+  }
+  .optimize-popover {
+    width: calc(100% - 24px);
+  }
+}

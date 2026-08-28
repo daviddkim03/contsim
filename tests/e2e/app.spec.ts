@@ -169,3 +169,47 @@ test('Discard keeps the current quantities', async ({ page }) => {
   await expect(badge(page)).toHaveText("Doesn't fit")
   await expect(qty(page, 2)).toHaveValue('40')
 })
+
+test('export downloads the scenario and import restores it', async ({ page }) => {
+  const downloadPromise = page.waitForEvent('download')
+  await page.locator('[data-action="export"]').click()
+  const download = await downloadPromise
+  expect(download.suggestedFilename()).toBe('contsim-scenario.json')
+  const path = await download.path()
+
+  await qty(page, 0).fill('3')
+  await expect(qty(page, 0)).toHaveValue('3')
+  await page.locator('[data-field="import-file"]').setInputFiles(path)
+  await expect(qty(page, 0)).toHaveValue('12')
+  await expect(badge(page)).toHaveText("Doesn't fit")
+})
+
+test('importing a file that is not a scenario changes nothing and says so', async ({ page }) => {
+  await page.locator('[data-field="import-file"]').evaluate((input: HTMLInputElement) => {
+    const transfer = new DataTransfer()
+    transfer.items.add(new File(['{"nope": 1}'], 'notes.json', { type: 'application/json' }))
+    input.files = transfer.files
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await expect(page.locator('[data-role="footer-hint"]')).toHaveText(
+    'notes.json is not a contsim scenario.',
+  )
+  await expect(qty(page, 0)).toHaveValue('12')
+})
+
+test('smoke: example, bump a quantity, Optimize, Apply, Fits', async ({ page }) => {
+  await setQuantities(page, [6, 3, 20, 10, 30])
+  await expect(badge(page)).toHaveText('Fits')
+  // Add pallet boxes one at a time until the packer can no longer fit everything.
+  const pallet = row(page, 0)
+  for (let i = 0; i < 30 && (await badge(page).textContent()) === 'Fits'; i++) {
+    await pallet.locator('[data-action="inc"]').click()
+    await expect(page.locator('.status')).not.toHaveClass(/stale/)
+  }
+  await expect(badge(page)).not.toHaveText('Fits')
+  await page.locator('[data-action="optimize"]').click()
+  const popover = page.locator('.optimize-popover')
+  await expect(popover).toBeVisible({ timeout: 10_000 })
+  await popover.locator('[data-action="apply"]').click()
+  await expect(badge(page)).toHaveText('Fits')
+})

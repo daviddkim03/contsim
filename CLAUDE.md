@@ -1,15 +1,24 @@
 # contsim
 
-Container packing simulator. Read PROJECT.md first: it is the spec and the phased build plan.
+Container packing simulator: a static, browser-only app that checks whether boxes fit in a container, shows the packing in 3D, and proposes reductions when they do not. PROJECT.md is the spec and build plan; README.md is the user-facing overview.
 
 ## Commands
 
 - `npm run dev` / `npm run build` / `npm run preview`
-- `npm test` (Vitest, tests live in `tests/**/*.test.ts`), `npm run test:watch`
+- `npm test` (Vitest unit tests in `tests/core` and `tests/ui`), `npm run test:watch`
+- `npm run test:e2e` (Playwright, drives the production build in Chromium; run `npx playwright install chromium` once)
 - `npm run lint` (ESLint + Prettier check), `npm run format`, `npm run typecheck`
 
-## Rules
+## Architecture
 
-- `src/core` is pure and framework-free: no DOM, no three.js, no imports from `src/ui` (enforced by ESLint).
-- Dims are integers inside `src/core`; unit scaling happens at the UI boundary (PROJECT.md section 2).
-- Keep lint and tests green at every commit. One phase of PROJECT.md per commit.
+- `src/core`: pure algorithm code. No DOM, no three.js, no imports from `src/ui` (ESLint enforces this). Everything works on integer units; the UI scales real-world numbers at the boundary (`src/ui/units.ts`).
+- `src/ui/state.ts`: single store. `draft` holds raw input strings, `derived` is computed by `derive()` (parse, scale, validate, pack), `view` and `optimize` are transient slices. Panels render from state and never keep their own copy.
+- `src/ui/viewer3d.ts` renders on demand, not in a loop. Core x = length, y = width, z = height; the scene maps height to y and width to z (`viewerMath.ts`).
+- Status semantics matter: `fits` is proven, `impossible` is proven, `not-found` means the heuristic failed. Never present a heuristic miss as impossibility.
+
+## Working rules
+
+- Keep `npm test`, `npm run lint`, and `npm run test:e2e` green at every commit. Fix flakiness when it appears.
+- Verify UI changes in the real app (screenshots via Playwright), not only in unit tests.
+- Add a fixture to `tests/core/fixtures.ts` when reproducing a packing bug.
+- No em dashes in prose or code comments; use "-".

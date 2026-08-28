@@ -254,6 +254,10 @@ export const edits = {
 
 export const STORAGE_KEY = 'contsim.draft.v1'
 
+export function serializeDraft(draft: Draft): string {
+  return JSON.stringify(draft, null, 2)
+}
+
 const isString = (v: unknown): v is string => typeof v === 'string'
 
 /** Reads a draft back from JSON, rejecting anything that does not have the expected shape. */

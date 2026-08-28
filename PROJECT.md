@@ -14,6 +14,10 @@ This file is both the spec and the build plan. Each phase in section 8 is writte
 4. Optimizer: run the packer with several orderings, keep the best feasible plan, then greedily add boxes back (section 4.3). Runs in a Web Worker.
 5. Build in the order of section 8: scaffold -> core -> packer -> minimal UI -> 3D -> optimizer -> polish. One phase per commit, acceptance criteria before moving on.
 
+## Status
+
+All six phases were built and verified on 2026-08-28: 116 unit tests, 14 Playwright tests against the production build, lint and typecheck green. Deployment is a static `dist/` folder (README.md). Deviations from the original plan are noted inline in the sections below.
+
 ## 1. Goals and non-goals
 
 Goals (v1):
@@ -304,7 +308,7 @@ The takeoff-tool screenshot is the layout and style reference: dark left sidebar
 - 3D view: container as a wireframe over a light floor, boxes as solid colored cuboids with dark edges, one stable color per type. Hovering a legend row or a sidebar row highlights that type (everything else fades). The layer slider hides every box whose bottom is above the chosen height so the user can look inside. The camera follows the container until the user first orbits; after that it only moves on Reset view or when the container dims change. A 3D / Table toggle swaps the center panel for the placement list. Rendering is on demand, not a loop. Without WebGL the app falls back to the table.
 - Unplaced boxes: shown in the legend as "7/10" and listed under the status.
 - Optimize: runs in a Web Worker; the button shows progress ("Optimizing 34 / 200") and a Cancel button appears (cancel terminates the worker). The result popover (bottom-left of the stage) lists per-type reductions ("40 -> 25") with Apply / Discard, and the 3D view and table preview the proposed packing until the user decides. Any edit discards a pending proposal. An objective dropdown sits next to the button (default keep-most-boxes). Measured on the example: keep-most-boxes removes 2 pallet boxes and keeps 136 of 138, in well under a second.
-- Persistence: the current scenario is saved to localStorage on every change. Export / Import JSON. "Load example" restores the sample scenario.
+- Persistence: the current scenario is saved to localStorage on every change. Export JSON downloads `contsim-scenario.json`; Import JSON reads one back (a file that is not a scenario shows a message and changes nothing). "Load example" restores the sample scenario after a confirmation.
 - Validation: non-numeric, zero, negative, or absurdly large dims mark the field invalid; the packer does not run; status shows "Fix inputs". Never crash on bad input.
 
 ### 5.3 Style
@@ -414,7 +418,7 @@ Do the phases in order. Each has acceptance criteria; do not start the next unti
 - JSON import / export, units dropdown, keyboard steppers, empty and error states, responsive layout (sidebar collapses under 900 px), title and favicon.
 - One Playwright smoke test: load example -> bump a qty -> see "Doesn't fit" -> Optimize -> Apply -> see "Fits".
 - `npm run build`, deploy `dist/` to a static host.
-- Run `/init` in Claude Code to generate a CLAUDE.md from the finished structure.
+- CLAUDE.md written by hand for the finished structure; README.md covers usage and deployment.
 
 ## 9. Test fixtures (`tests/core/fixtures.ts` and `src/scenarios.ts`)
 

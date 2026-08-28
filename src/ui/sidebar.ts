@@ -1,16 +1,18 @@
-import { h, query, setInvalid, setValue } from './dom'
+import type { Objective } from '../core'
+import { h, query, setInvalid, setValue, setText } from './dom'
 import { wireHover } from './legend'
+import type { OptimizeController } from './optimizeClient'
 import {
   edits,
   exampleDraft,
+  parseDraft,
+  serializeDraft,
   type AppState,
   type BoxTypeDraft,
   type ContainerKey,
   type Store,
   type TypeField,
 } from './state'
-import type { Objective } from '../core'
-import type { OptimizeController } from './optimizeClient'
 import { UNITS, type Unit } from './units'
 
 export interface Panel {
@@ -19,12 +21,12 @@ export interface Panel {
 
 const CONTAINER_KEYS: ContainerKey[] = ['l', 'w', 'h']
 const TYPE_FIELDS: TypeField[] = ['name', 'l', 'w', 'h', 'qty']
-
 const OBJECTIVES: { value: Objective; label: string }[] = [
   { value: 'keep-most-boxes', label: 'Keep most boxes' },
   { value: 'keep-most-volume', label: 'Keep most volume' },
   { value: 'cut-evenly', label: 'Cut evenly' },
 ]
+export const EXPORT_FILENAME = 'contsim-scenario.json'
 
 export function mountSidebar(
   root: HTMLElement,
@@ -79,7 +81,12 @@ export function mountSidebar(
         </select>
       </div>
       <button type="button" class="ghost" data-action="cancel-optimize" hidden>Cancel</button>
-      <button type="button" class="ghost" data-action="example">Load example</button>
+      <div class="file-row">
+        <button type="button" class="ghost" data-action="example">Load example</button>
+        <button type="button" class="ghost" data-action="export">Export JSON</button>
+        <button type="button" class="ghost" data-action="import">Import JSON</button>
+        <input type="file" accept="application/json,.json" data-field="import-file" hidden>
+      </div>
       <p class="hint" data-role="footer-hint">Results update as you type</p>
     </footer>
   `
@@ -94,13 +101,20 @@ export function mountSidebar(
   const optimizeButton = query<HTMLButtonElement>(root, '[data-action="optimize"]')
   const cancelButton = query<HTMLButtonElement>(root, '[data-action="cancel-optimize"]')
   const objectiveSelect = query<HTMLSelectElement>(root, '[data-field="objective"]')
+  const importInput = query<HTMLInputElement>(root, '[data-field="import-file"]')
   const footerHint = query<HTMLElement>(root, '[data-role="footer-hint"]')
+  let notice: string | null = null
   wireHover(list, '.box-row', store)
 
   // Text inputs: every keystroke is an edit.
   root.addEventListener('input', (event) => {
     const target = event.target
-    if (!(target instanceof HTMLInputElement) || target.type === 'checkbox') return
+    if (
+      !(target instanceof HTMLInputElement) ||
+      (target.type !== 'text' && target.type !== 'number')
+    ) {
+      return
+    }
     const field = target.dataset.field
     if (!field) return
     const row = target.closest<HTMLElement>('li[data-id]')
@@ -124,6 +138,7 @@ export function mountSidebar(
     if (target === objectiveSelect) {
       store.setOptimize({ objective: objectiveSelect.value as Objective })
     }
+    if (target === importInput) void importFile(importInput.files?.[0])
   })
 
   root.addEventListener('click', (event) => {
@@ -160,8 +175,35 @@ export function mountSidebar(
         }
         break
       }
+      case 'export':
+        exportFile()
+        break
+      case 'import':
+        importInput.value = ''
+        importInput.click()
+        break
     }
   })
+
+  function exportFile(): void {
+    const blob = new Blob([serializeDraft(store.get().draft)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = h('a', { href: url, download: EXPORT_FILENAME })
+    link.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+
+  async function importFile(file: File | undefined): Promise<void> {
+    if (!file) return
+    const draft = parseDraft(await file.text())
+    if (!draft) {
+      notice = `${file.name} is not a contsim scenario.`
+      render(store.get())
+      return
+    }
+    notice = null
+    store.edit(() => draft)
+  }
 
   function createRow(id: string): HTMLLIElement {
     const row = h('li', { class: 'box-row', 'data-id': id })
@@ -204,43 +246,54 @@ export function mountSidebar(
     }
   }
 
-  return {
-    render(state) {
-      const { draft, derived } = state
-      for (const key of CONTAINER_KEYS) {
-        setValue(containerInputs[key], draft.container[key])
-        setInvalid(containerInputs[key], derived.issues[`container.${key}`])
-      }
-      setValue(unitSelect, draft.unit)
-      uprightCheckbox.checked = draft.keepUpright
+  function render(state: AppState): void {
+    const { draft, derived, optimize } = state
+    for (const key of CONTAINER_KEYS) {
+      setValue(containerInputs[key], draft.container[key])
+      setInvalid(containerInputs[key], derived.issues[`container.${key}`])
+    }
+    setValue(unitSelect, draft.unit)
+    uprightCheckbox.checked = draft.keepUpright
 
-      const existing = new Map<string, HTMLLIElement>()
-      for (const li of list.querySelectorAll<HTMLLIElement>('li[data-id]')) {
-        existing.set(li.dataset.id!, li)
-      }
-      draft.types.forEach((type, index) => {
-        let row = existing.get(type.id)
-        if (row) existing.delete(type.id)
-        else row = createRow(type.id)
-        if (list.children[index] !== row) list.insertBefore(row, list.children[index] ?? null)
-        updateRow(row, type, index, derived.issues)
-      })
-      for (const row of existing.values()) row.remove()
-      empty.hidden = draft.types.length > 0
+    const existing = new Map<string, HTMLLIElement>()
+    for (const li of list.querySelectorAll<HTMLLIElement>('li[data-id]')) {
+      existing.set(li.dataset.id!, li)
+    }
+    draft.types.forEach((type, index) => {
+      let row = existing.get(type.id)
+      if (row) existing.delete(type.id)
+      else row = createRow(type.id)
+      if (list.children[index] !== row) list.insertBefore(row, list.children[index] ?? null)
+      updateRow(row, type, index, derived.issues)
+    })
+    for (const row of existing.values()) row.remove()
+    empty.hidden = draft.types.length > 0
 
-      const { optimize, derived: d } = state
-      const running = optimize.status === 'running'
-      const canOptimize = d.result !== null && d.result.status !== 'fits' && !running && !d.stale
-      optimizeButton.disabled = !canOptimize
-      optimizeButton.textContent = running ? `Optimizing  / ` : 'Optimize'
-      cancelButton.hidden = !running
-      setValue(objectiveSelect, optimize.objective)
-      objectiveSelect.disabled = running
-      footerHint.textContent = !d.result
-        ? 'Fix the inputs first'
-        : d.result.status === 'fits'
-          ? 'Everything fits, nothing to optimize'
-          : 'Results update as you type'
-    },
+    const running = optimize.status === 'running'
+    const result = derived.result
+    optimizeButton.disabled = !result || result.status === 'fits' || running || derived.stale
+    setText(
+      optimizeButton,
+      running ? `Optimizing ${optimize.runs} / ${optimize.maxRuns}` : 'Optimize',
+    )
+    cancelButton.hidden = !running
+    setValue(objectiveSelect, optimize.objective)
+    objectiveSelect.disabled = running
+    footerHint.classList.toggle('error', notice !== null)
+    setText(
+      footerHint,
+      notice ??
+        (!result
+          ? 'Fix the inputs first'
+          : result.status === 'fits'
+            ? 'Everything fits, nothing to optimize'
+            : 'Results update as you type'),
+    )
   }
+
+  store.subscribe(() => {
+    notice = null
+  })
+
+  return { render }
 }
