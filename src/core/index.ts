@@ -7,4 +7,6 @@ export {
   type FeasibilityOptions,
   type ImpossibilityFormat,
 } from './feasibility'
+export { expandTypes, mulberry32, orderItems, type Item } from './ordering'
+export { DEFAULT_PACK_OPTIONS, pack } from './packer'
 export { MAX_DIM, MAX_QTY, validateScenario, type ValidationIssue } from './validate'

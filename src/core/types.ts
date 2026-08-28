@@ -43,6 +43,13 @@ export interface Placement extends Point, Size {
   typeId: string
 }
 
+/** A complete input to the packer. */
+export interface Scenario {
+  container: Container
+  types: BoxType[]
+  keepUpright: boolean
+}
+
 /**
  * - fits: every requested box was placed (a constructive proof).
  * - impossible: proven by a quick check; see Impossibility for the reason.

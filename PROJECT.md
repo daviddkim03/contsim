@@ -341,6 +341,7 @@ contsim/
       optimizer.ts        multi-start + add-back (4.3)
       ordering.ts         orderings + seeded PRNG
       index.ts
+    scenarios.ts          standard containers, mixedScenario() and exampleScenario(); used by tests and "Load example"
     ui/
       state.ts            scenario state, reducers, validation, localStorage, JSON import/export
       units.ts            unit labels, integer scaling at the boundary
@@ -351,8 +352,8 @@ contsim/
       palette.ts
     main.ts
   tests/
-    core/                 geometry.test.ts, feasibility.test.ts, packer.test.ts, optimizer.test.ts
-    fixtures/             scenarios used by tests and by "Load example"
+    core/                 geometry, feasibility, validate, ordering, packer, optimizer tests
+    core/fixtures.ts      synthetic scenarios (tiny, rotation, pinwheel, perf300) and packingViolation()
 ```
 
 Rule: `src/core` must never import from `src/ui` or from three.js. This keeps the algorithm testable in milliseconds and reusable (CLI, Node, a different UI).
@@ -377,7 +378,7 @@ Do the phases in order. Each has acceptance criteria; do not start the next unti
 - `packer.ts` + `ordering.ts` as in 4.2.
 - Accept (tests):
   - `tiny`: 8 unit cubes in 2x2x2, and 27 in 3x3x3: all placed, fill 100 %.
-  - `rotation`: a 10x1x1 box in a 1x1x10 container is placed; with keepUpright it is not.
+  - `rotation`: a 10x1x1 box in a 1x1x10 container is placed; with keepUpright the result is `impossible` (oversize).
   - `mixed-20ft`: a realistic mix at about 50 % of container volume: all placed.
   - `pinwheel`: status is `not-found` (documents the known limitation; must not be `impossible`).
   - Invariants on 200 random scenarios: no two placements overlap; every placement is inside the container; placed + unplaced equals requested per type; the same input twice gives identical output.
@@ -406,15 +407,15 @@ Do the phases in order. Each has acceptance criteria; do not start the next unti
 - `npm run build`, deploy `dist/` to a static host.
 - Run `/init` in Claude Code to generate a CLAUDE.md from the finished structure.
 
-## 9. Test fixtures (`tests/fixtures`)
+## 9. Test fixtures (`tests/core/fixtures.ts` and `src/scenarios.ts`)
 
 - `tiny`: 2x2x2 container, 8 x (1x1x1).
 - `rotation`: 1x1x10 container, 1 x (10x1x1).
 - `overfull`: 4x4x4 container, 70 x (1x1x1). Volume 70 > 64, expect `impossible` with the volume reason.
 - `oversize`: 10x10x10 container, 1 x (11x1x1). Expect `impossible` with the oversize reason.
 - `pinwheel`: 5x5x1 container, 4 x (3x2x1) + 1 x (1x1x1). Volume is exactly 25 and a pinwheel arrangement fits, but first-fit-decreasing cannot find it. Expect `not-found`.
-- `mixed-20ft`: container-20ft with 4-5 box types totaling about 50 % of the volume. Expect `fits`.
-- `example`: container-20ft with 4-5 box types, one quantity deliberately too high so the app opens on "Doesn't fit" and Optimize has something to do.
+- `mixedScenario()`: container-20ft with 5 box types at about 47 % of the volume. Expect `fits` (measured: fits with volume-desc, height-desc, footprint-desc, round-robin and the seeded shuffles; volume-asc leaves 2 pallet boxes out, which is why it is only used by the optimizer).
+- `exampleScenario()`: the same mix with roughly double the quantities (94 % of the volume), so the app opens on "Doesn't fit" and Optimize has something to do. Measured: volume-desc places 123 of 138 boxes at 88 % fill in about 2 ms.
 
 Approximate interior dims of standard dry containers, in inches (good enough for the example; make them editable):
 
