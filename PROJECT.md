@@ -294,7 +294,7 @@ The takeoff-tool screenshot is the layout and style reference: dark left sidebar
 
 ### 5.2 Behaviour
 
-- Every edit (container dims, box dims, qty, upright toggle) re-runs the checks and the packer, debounced ~150 ms. There is no "Check" button; the status is always current.
+- Every edit (container dims, box dims, qty, upright toggle) re-runs the checks and the packer, debounced ~150 ms. There is no "Check" button; the status is always current. The unit selector sits next to the container dims in the sidebar rather than above the canvas.
 - Qty has - / + steppers and accepts typing; arrow keys step. Minimum 0. A type with qty 0 stays in the list, greyed out.
 - Status badge:
   - Fits (green): "All 24 boxes placed. Fill 71 %."
@@ -315,7 +315,7 @@ Dark sidebar, light canvas background, amber primary button, muted secondary but
 
 - TypeScript + Vite. Vanilla DOM for the UI: one `render(state)` function per panel, event delegation, a single immutable state object. If the UI grows, Preact or Svelte are fine; keep `src/core` framework-free either way.
 - three.js for the 3D view (BoxGeometry + EdgesGeometry per box, InstancedMesh only if it ever gets slow; OrbitControls from `three/addons/controls/OrbitControls.js`). The only runtime dependency.
-- Vitest for unit tests of the core. Playwright for one end-to-end smoke test (Phase 6).
+- Vitest for unit tests of the core and the pure UI modules. Playwright (`npm run test:e2e`) drives the production build in Chromium; it was pulled forward from Phase 6 so every UI phase is verified in a real browser.
 - ESLint + Prettier. `npm run lint` and `npm test` must stay green at every commit.
 - Static deploy (GitHub Pages, Netlify, any static host). No backend, no database, no accounts.
 - Worker: `new Worker(new URL('./optimizeWorker.ts', import.meta.url), { type: 'module' })`; Vite bundles it.
@@ -344,15 +344,20 @@ contsim/
     scenarios.ts          standard containers, mixedScenario() and exampleScenario(); used by tests and "Load example"
     ui/
       state.ts            scenario state, reducers, validation, localStorage, JSON import/export
-      units.ts            unit labels, integer scaling at the boundary
+      units.ts            unit labels, integer scaling at the boundary, formatting
+      dom.ts              tiny DOM helpers (h, setValue, setInvalid)
+      palette.ts          box type colors
       sidebar.ts          container inputs, box list, options, Optimize button
-      legend.ts           legend + status panel
+      legend.ts           status panel + legend
+      placementsTable.ts  placement list; the center panel until the 3D view exists
       viewer3d.ts         three.js scene, colors, layer slider, highlight
       optimizeWorker.ts   runs optimize() off the main thread
       palette.ts
     main.ts
   tests/
     core/                 geometry, feasibility, validate, ordering, packer, optimizer tests
+    ui/                   units and state tests
+    e2e/                  Playwright smoke tests against the production build (npm run test:e2e)
     core/fixtures.ts      synthetic scenarios (tiny, rotation, pinwheel, perf300) and packingViolation()
 ```
 
