@@ -37,6 +37,7 @@ export function pack(
   const opts: PackOptions = {
     keepUpright: options.keepUpright ?? DEFAULT_PACK_OPTIONS.keepUpright,
     order: options.order ?? DEFAULT_PACK_OPTIONS.order,
+    skipChecks: options.skipChecks ?? false,
   }
 
   const issues = validateScenario(container, types)
@@ -48,7 +49,7 @@ export function pack(
   const requested = types.reduce((n, t) => n + t.qty, 0)
   const containerVolume = volume(container)
 
-  const impossibility = findImpossibility(container, types, opts)
+  const impossibility = opts.skipChecks ? null : findImpossibility(container, types, opts)
   if (impossibility) {
     const unplaced: Record<string, number> = {}
     for (const t of types) if (t.qty > 0) unplaced[t.id] = t.qty

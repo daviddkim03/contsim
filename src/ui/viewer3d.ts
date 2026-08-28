@@ -19,7 +19,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import type { BoxType, Container, Placement } from '../core'
 import { query } from './dom'
 import type { Panel } from './sidebar'
-import type { AppState, Store } from './state'
+import { shownResult, type AppState, type Store } from './state'
 import { FOV, boxCenter, boxSize, frameContainer, isBelowLayer } from './viewerMath'
 
 const BACKGROUND = '#eef1f5'
@@ -238,7 +238,8 @@ export function mountViewer(root: HTMLElement, store: Store): Viewer {
 
   return {
     render(state) {
-      const { scenario, result } = state.derived
+      const { scenario } = state.derived
+      const result = shownResult(state)
       overlay.hidden = scenario !== null
       if (!scenario) overlay.textContent = 'Fix the inputs to see the packing.'
 

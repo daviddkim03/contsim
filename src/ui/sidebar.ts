@@ -9,6 +9,8 @@ import {
   type Store,
   type TypeField,
 } from './state'
+import type { Objective } from '../core'
+import type { OptimizeController } from './optimizeClient'
 import { UNITS, type Unit } from './units'
 
 export interface Panel {
@@ -18,7 +20,17 @@ export interface Panel {
 const CONTAINER_KEYS: ContainerKey[] = ['l', 'w', 'h']
 const TYPE_FIELDS: TypeField[] = ['name', 'l', 'w', 'h', 'qty']
 
-export function mountSidebar(root: HTMLElement, store: Store): Panel {
+const OBJECTIVES: { value: Objective; label: string }[] = [
+  { value: 'keep-most-boxes', label: 'Keep most boxes' },
+  { value: 'keep-most-volume', label: 'Keep most volume' },
+  { value: 'cut-evenly', label: 'Cut evenly' },
+]
+
+export function mountSidebar(
+  root: HTMLElement,
+  store: Store,
+  optimizer: OptimizeController,
+): Panel {
   root.innerHTML = `
     <header class="brand">
       <h1>contsim</h1>
@@ -60,9 +72,15 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
     </section>
 
     <footer class="sidebar-actions">
-      <button type="button" class="primary" data-action="optimize" disabled title="Optimize arrives in Phase 5">Optimize</button>
+      <div class="optimize-row">
+        <button type="button" class="primary" data-action="optimize">Optimize</button>
+        <select data-field="objective" aria-label="Optimize objective">
+          ${OBJECTIVES.map((o) => `<option value="${o.value}">${o.label}</option>`).join('')}
+        </select>
+      </div>
+      <button type="button" class="ghost" data-action="cancel-optimize" hidden>Cancel</button>
       <button type="button" class="ghost" data-action="example">Load example</button>
-      <p class="hint">Results update as you type</p>
+      <p class="hint" data-role="footer-hint">Results update as you type</p>
     </footer>
   `
 
@@ -73,6 +91,10 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
   const uprightCheckbox = query<HTMLInputElement>(root, '[data-field="keepUpright"]')
   const list = query<HTMLUListElement>(root, '.box-list')
   const empty = query<HTMLElement>(root, '.empty')
+  const optimizeButton = query<HTMLButtonElement>(root, '[data-action="optimize"]')
+  const cancelButton = query<HTMLButtonElement>(root, '[data-action="cancel-optimize"]')
+  const objectiveSelect = query<HTMLSelectElement>(root, '[data-field="objective"]')
+  const footerHint = query<HTMLElement>(root, '[data-role="footer-hint"]')
   wireHover(list, '.box-row', store)
 
   // Text inputs: every keystroke is an edit.
@@ -99,6 +121,9 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
     if (target === uprightCheckbox) {
       store.edit((d) => edits.setKeepUpright(d, uprightCheckbox.checked))
     }
+    if (target === objectiveSelect) {
+      store.setOptimize({ objective: objectiveSelect.value as Objective })
+    }
   })
 
   root.addEventListener('click', (event) => {
@@ -119,6 +144,12 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
         break
       case 'dec':
         if (id) store.edit((d) => edits.stepQty(d, id, -1))
+        break
+      case 'optimize':
+        optimizer.start()
+        break
+      case 'cancel-optimize':
+        optimizer.cancel()
         break
       case 'example': {
         const current = JSON.stringify(store.get().draft)
@@ -174,7 +205,8 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
   }
 
   return {
-    render({ draft, derived }) {
+    render(state) {
+      const { draft, derived } = state
       for (const key of CONTAINER_KEYS) {
         setValue(containerInputs[key], draft.container[key])
         setInvalid(containerInputs[key], derived.issues[`container.${key}`])
@@ -195,6 +227,20 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
       })
       for (const row of existing.values()) row.remove()
       empty.hidden = draft.types.length > 0
+
+      const { optimize, derived: d } = state
+      const running = optimize.status === 'running'
+      const canOptimize = d.result !== null && d.result.status !== 'fits' && !running && !d.stale
+      optimizeButton.disabled = !canOptimize
+      optimizeButton.textContent = running ? `Optimizing  / ` : 'Optimize'
+      cancelButton.hidden = !running
+      setValue(objectiveSelect, optimize.objective)
+      objectiveSelect.disabled = running
+      footerHint.textContent = !d.result
+        ? 'Fix the inputs first'
+        : d.result.status === 'fits'
+          ? 'Everything fits, nothing to optimize'
+          : 'Results update as you type'
     },
   }
 }

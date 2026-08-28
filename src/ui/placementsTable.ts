@@ -1,9 +1,9 @@
 import { h, query, setText } from './dom'
-import type { AppState, Store } from './state'
 import type { Panel } from './sidebar'
+import { shownResult, type AppState, type Store } from './state'
 import { formatNumber } from './units'
 
-/** Plain list of placements. Stands in for the 3D view until Phase 4. */
+/** Plain list of placements: the alternative to the 3D view. */
 export function mountPlacementsTable(root: HTMLElement, store: Store): Panel {
   void store
   root.innerHTML = `
@@ -15,7 +15,7 @@ export function mountPlacementsTable(root: HTMLElement, store: Store): Panel {
       <div class="table-wrap">
         <table>
           <thead>
-            <tr><th>#</th><th>Box</th><th class="num">x</th><th class="num">y</th><th class="num">z</th><th>Size</th></tr>
+            <tr><th class="num">#</th><th>Box</th><th class="num">x</th><th class="num">y</th><th class="num">z</th><th class="num">Size</th></tr>
           </thead>
           <tbody></tbody>
         </table>
@@ -28,20 +28,22 @@ export function mountPlacementsTable(root: HTMLElement, store: Store): Panel {
   const empty = query<HTMLElement>(root, '.empty')
 
   return {
-    render({ draft, derived }: AppState) {
-      const { result, scenario, scale } = derived
+    render(state: AppState) {
+      const { draft, derived } = state
+      const { scenario, scale } = derived
+      const result = shownResult(state)
       if (!result || !scenario) {
         tbody.replaceChildren()
         empty.hidden = false
         setText(summary, '')
         return
       }
-      const names = new Map(scenario.types.map((t) => [t.id, t]))
+      const types = new Map(scenario.types.map((t) => [t.id, t]))
       const n = (v: number) => formatNumber(v, scale)
       const rows = result.placements.map((p, i) => {
-        const type = names.get(p.typeId)
+        const type = types.get(p.typeId)
         const swatch = h('span', { class: 'swatch' })
-        swatch.style.background = type?.color ?? '#888'
+        swatch.style.background = type?.color ?? '#888888'
         return h('tr', {}, [
           h('td', { class: 'num', text: String(i + 1) }),
           h('td', {}, [swatch, ' ', type?.name ?? p.typeId]),

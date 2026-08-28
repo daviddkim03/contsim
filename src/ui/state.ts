@@ -3,6 +3,8 @@ import {
   validateScenario,
   type BoxType,
   type Container,
+  type Objective,
+  type OptimizeResult,
   type PackResult,
   type Scenario,
 } from '../core'
@@ -56,10 +58,39 @@ export const DEFAULT_VIEW: ViewState = {
   hoverTypeId: null,
 }
 
+/** Optimizer run state. Any edit of the draft resets it to idle. */
+export interface OptimizeUiState {
+  status: 'idle' | 'running' | 'done' | 'failed'
+  objective: Objective
+  runs: number
+  maxRuns: number
+  bestKept: number
+  result: OptimizeResult | null
+  error: string | null
+}
+
+export const DEFAULT_OPTIMIZE: OptimizeUiState = {
+  status: 'idle',
+  objective: 'keep-most-boxes',
+  runs: 0,
+  maxRuns: 0,
+  bestKept: 0,
+  result: null,
+  error: null,
+}
+
 export interface AppState {
   draft: Draft
   derived: Derived
   view: ViewState
+  optimize: OptimizeUiState
+}
+
+/** The packing to display: the optimizer's proposal while one is shown, otherwise the current result. */
+export function shownResult(state: AppState): PackResult | null {
+  const o = state.optimize
+  if (o.status === 'done' && o.result) return o.result.result
+  return state.derived.result
 }
 
 // ---------------------------------------------------------------------------
@@ -287,7 +318,7 @@ export class Store {
   constructor(draft: Draft, storage: Storage | null = null, debounceMs = 150) {
     this.storage = storage
     this.debounceMs = debounceMs
-    this.state = { draft, derived: derive(draft), view: DEFAULT_VIEW }
+    this.state = { draft, derived: derive(draft), view: DEFAULT_VIEW, optimize: DEFAULT_OPTIMIZE }
   }
 
   get(): AppState {
@@ -303,7 +334,12 @@ export class Store {
   edit(fn: (draft: Draft) => Draft): void {
     const draft = fn(this.state.draft)
     if (draft === this.state.draft) return
-    this.state = { ...this.state, draft, derived: { ...this.state.derived, stale: true } }
+    this.state = {
+      ...this.state,
+      draft,
+      derived: { ...this.state.derived, stale: true },
+      optimize: { ...DEFAULT_OPTIMIZE, objective: this.state.optimize.objective },
+    }
     saveDraft(this.storage, draft)
     this.emit()
     this.schedule()
@@ -312,6 +348,12 @@ export class Store {
   /** Changes view settings only; listeners are notified, nothing is persisted or recomputed. */
   setView(patch: Partial<ViewState>): void {
     this.state = { ...this.state, view: { ...this.state.view, ...patch } }
+    this.emit()
+  }
+
+  /** Updates optimizer state; listeners are notified, nothing is persisted or recomputed. */
+  setOptimize(patch: Partial<OptimizeUiState>): void {
+    this.state = { ...this.state, optimize: { ...this.state.optimize, ...patch } }
     this.emit()
   }
 

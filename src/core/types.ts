@@ -94,6 +94,12 @@ export interface PackOptions {
   /** Only allow rotations around the vertical axis (height stays vertical). */
   keepUpright: boolean
   order: Ordering
+  /**
+   * Skip the quick impossibility checks and always attempt placement. The
+   * optimizer uses this to get a feasible partial packing even when the full
+   * request is provably impossible.
+   */
+  skipChecks?: boolean
 }
 
 export type Objective = 'keep-most-boxes' | 'keep-most-volume' | 'cut-evenly'

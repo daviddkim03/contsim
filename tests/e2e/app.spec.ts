@@ -138,3 +138,34 @@ test('hovering a legend or sidebar row highlights that box type', async ({ page 
   await page.locator('.status').hover()
   await expect(stage).toHaveAttribute('data-hover', '')
 })
+
+test('Optimize proposes reductions and Apply makes everything fit', async ({ page }) => {
+  const optimize = page.locator('[data-action="optimize"]')
+  await expect(optimize).toBeEnabled()
+  await optimize.click()
+  const popover = page.locator('.optimize-popover')
+  await expect(popover).toBeVisible({ timeout: 10_000 })
+  // Plain packing places 123 of 138; the optimizer must do at least as well and propose a fitting plan.
+  const title = popover.locator('[data-role="popover-title"]')
+  await expect(title).toHaveText(/^Keep \d+ of 138 boxes$/)
+  const kept = Number(/Keep (\d+) of/.exec((await title.textContent()) ?? '')?.[1])
+  expect(kept).toBeGreaterThanOrEqual(123)
+  expect(kept).toBeLessThan(138)
+  await expect(popover.locator('.reductions li')).not.toHaveCount(0)
+  await expect(popover.locator('.reduction-change').first()).toContainText('→')
+
+  await popover.locator('[data-action="apply"]').click()
+  await expect(popover).toBeHidden()
+  await expect(badge(page)).toHaveText('Fits')
+  await expect(optimize).toBeDisabled()
+})
+
+test('Discard keeps the current quantities', async ({ page }) => {
+  await page.locator('[data-action="optimize"]').click()
+  const popover = page.locator('.optimize-popover')
+  await expect(popover).toBeVisible({ timeout: 10_000 })
+  await popover.locator('[data-action="discard"]').click()
+  await expect(popover).toBeHidden()
+  await expect(badge(page)).toHaveText("Doesn't fit")
+  await expect(qty(page, 2)).toHaveValue('40')
+})

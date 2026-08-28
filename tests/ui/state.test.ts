@@ -194,3 +194,14 @@ describe('view state', () => {
     expect(store.get().view.layer).toBe(48)
   })
 })
+
+describe('optimize state', () => {
+  it('starts idle, accepts patches, and resets on any edit except the objective', () => {
+    const store = new Store(mixed(), null, 0)
+    expect(store.get().optimize.status).toBe('idle')
+    store.setOptimize({ objective: 'cut-evenly', status: 'running', runs: 3, maxRuns: 200 })
+    expect(store.get().optimize).toMatchObject({ status: 'running', runs: 3 })
+    store.edit((d) => edits.stepQty(d, 'pallet', 1))
+    expect(store.get().optimize).toMatchObject({ status: 'idle', runs: 0, objective: 'cut-evenly' })
+  })
+})
