@@ -46,7 +46,7 @@ Non-goals (v1) - deliberately out of scope to keep it small:
 
 Units: the core is unit-agnostic. The UI has a unit label (in, ft, cm, mm, m) that only affects labels and the volume readout.
 
-Numeric precision: convert all dims to integers at the UI boundary (multiply by 10^p, where p = max number of decimals across all inputs, capped at 3). The core does integer math only, so comparisons are exact. This avoids the classic float bug where 0.1 + 0.2 pushes a box 1e-17 past the wall and the app says "doesn't fit". Validate that dims are <= 10^6 units so products stay well inside safe-integer range.
+Numeric precision: convert all dims to integers at the UI boundary (multiply by 10^p, where p = max number of decimals across all inputs, capped at 3). The core does integer math only, so comparisons are exact. This avoids the classic float bug where 0.1 + 0.2 pushes a box 1e-17 past the wall and the app says "doesn't fit". Positions and extents never exceed a container dimension, so they stay exact; volumes are only used for the volume check and the fill ratio, where float rounding is harmless. The core accepts dims up to 10^7 units and quantities up to 10,000 per type; `validateScenario` in `src/core/validate.ts` reports every issue it finds so the UI can flag each field.
 
 Defaults (change if you disagree, but change them in one place):
 
@@ -92,9 +92,15 @@ export interface Placement {
 
 export type Status = 'fits' | 'not-found' | 'impossible'
 
+/** Structured reason for an impossible scenario; the UI formats it in its own units. */
+export type Impossibility =
+  | { kind: 'oversize'; typeId: string }
+  | { kind: 'volume'; boxVolume: number; containerVolume: number }
+  | { kind: 'upper-bound'; typeId: string; qty: number; maxAlone: number }
+
 export interface PackResult {
   status: Status
-  reason?: string // set when impossible
+  impossibility?: Impossibility // set when status is impossible
   placements: Placement[]
   unplaced: Record<string, number> // typeId -> count not placed
   stats: {
@@ -137,11 +143,11 @@ export interface OptimizeResult {
 
 Run before packing. They are O(number of types) and give a definitive "Impossible" with a human-readable reason:
 
-1. Oversize box. Sort the box dims a <= b <= c and the container dims A <= B <= C. If a > A or b > B or c > C the box fits in no orientation. With keepUpright: require h <= H and sorted(l, w) <= sorted(L, W) elementwise.
+1. Oversize box. No allowed orientation of the box fits inside the container (`orientations` + `insideContainer`). With keepUpright only the two upright orientations count.
 2. Volume. sum(qty_i * l_i * w_i * h_i) > L * W * H.
-3. Per-type upper bound. For each type, maxAlone = max over its orientations of floor(L/dx) * floor(W/dy) * floor(H/dz). If qty_i > maxAlone, that type cannot fit even in an otherwise empty container.
+3. Per-type upper bound (lattice bound). Let s be the smallest side of the box (with keepUpright: min(l, w) horizontally and h vertically). No more than floor(L/s) * floor(W/s) * floor(H/s) boxes of that type can be inside the container at once, whatever else is packed with them: every placed box has an extent of at least s along each axis, so it contains a point of the lattice (i*s - 1, j*s - 1, k*s - 1), and two non-overlapping boxes cannot share a lattice point. If qty_i exceeds the bound the scenario is impossible. Do not use the best single-orientation grid count here: it is a lower bound on capacity, not an upper bound (four 3x2x1 boxes fit in 5x5x1 as a pinwheel while every grid holds only two).
 
-If none fire, run the packer. Passing these checks proves nothing; only the packer can prove `fits`.
+If none fire, run the packer. Passing these checks proves nothing; only the packer can prove `fits`. The result is structured (`Impossibility`), and `describeImpossibility(imp, types, fmt)` turns it into a sentence; the UI passes formatters that undo the integer scaling.
 
 ### 4.2 Packer: extreme-point first-fit-decreasing (`src/core/packer.ts`)
 
@@ -330,6 +336,7 @@ contsim/
       types.ts
       geometry.ts         orientations(), overlaps(), covered(), volume()
       feasibility.ts      quick impossibility checks (4.1)
+      validate.ts         structural validation (MAX_DIM, MAX_QTY), reports every issue
       packer.ts           extreme-point packer (4.2)
       optimizer.ts        multi-start + add-back (4.3)
       ordering.ts         orderings + seeded PRNG
@@ -362,7 +369,7 @@ Do the phases in order. Each has acceptance criteria; do not start the next unti
 
 ### Phase 1 - Core geometry and feasibility
 
-- `types.ts`, `geometry.ts` (orientations with dedupe and keepUpright, overlaps, covered, volume), `feasibility.ts` (the three checks with reasons).
+- `types.ts`, `geometry.ts` (orientations with dedupe and keepUpright, overlaps, covered, volume), `feasibility.ts` (the three checks, structured reasons, `describeImpossibility`), `validate.ts` (structural validation).
 - Accept (tests): orientation counts (cube 1, two equal sides 3, otherwise 6; upright 2 or 1); overlap is symmetric and touching faces do not overlap; each impossibility check fires on a crafted case and stays quiet on a fitting case.
 
 ### Phase 2 - Packer
