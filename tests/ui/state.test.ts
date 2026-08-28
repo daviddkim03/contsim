@@ -175,3 +175,22 @@ describe('Store', () => {
     expect(calls).toBe(0)
   })
 })
+
+describe('view state', () => {
+  it('starts with defaults, patches without recompute, and survives edits', () => {
+    const store = new Store(mixed(), null, 0)
+    expect(store.get().view).toEqual({
+      mode: '3d',
+      layer: null,
+      showContainer: true,
+      hoverTypeId: null,
+    })
+    let notifications = 0
+    store.subscribe(() => notifications++)
+    store.setView({ layer: 48, hoverTypeId: 'pallet' })
+    expect(notifications).toBe(1)
+    expect(store.get().view).toMatchObject({ layer: 48, hoverTypeId: 'pallet', mode: '3d' })
+    store.edit((d) => edits.stepQty(d, 'pallet', 1))
+    expect(store.get().view.layer).toBe(48)
+  })
+})

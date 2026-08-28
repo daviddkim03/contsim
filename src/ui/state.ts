@@ -39,9 +39,27 @@ export interface Derived {
   stale: boolean
 }
 
+/** Transient view settings. Not persisted, never trigger a recompute. */
+export interface ViewState {
+  mode: '3d' | 'table'
+  /** Boxes whose bottom is above this height (core units) are hidden. null shows everything. */
+  layer: number | null
+  showContainer: boolean
+  /** Box type highlighted from the legend or the sidebar. */
+  hoverTypeId: string | null
+}
+
+export const DEFAULT_VIEW: ViewState = {
+  mode: '3d',
+  layer: null,
+  showContainer: true,
+  hoverTypeId: null,
+}
+
 export interface AppState {
   draft: Draft
   derived: Derived
+  view: ViewState
 }
 
 // ---------------------------------------------------------------------------
@@ -269,7 +287,7 @@ export class Store {
   constructor(draft: Draft, storage: Storage | null = null, debounceMs = 150) {
     this.storage = storage
     this.debounceMs = debounceMs
-    this.state = { draft, derived: derive(draft) }
+    this.state = { draft, derived: derive(draft), view: DEFAULT_VIEW }
   }
 
   get(): AppState {
@@ -285,10 +303,16 @@ export class Store {
   edit(fn: (draft: Draft) => Draft): void {
     const draft = fn(this.state.draft)
     if (draft === this.state.draft) return
-    this.state = { draft, derived: { ...this.state.derived, stale: true } }
+    this.state = { ...this.state, draft, derived: { ...this.state.derived, stale: true } }
     saveDraft(this.storage, draft)
     this.emit()
     this.schedule()
+  }
+
+  /** Changes view settings only; listeners are notified, nothing is persisted or recomputed. */
+  setView(patch: Partial<ViewState>): void {
+    this.state = { ...this.state, view: { ...this.state.view, ...patch } }
+    this.emit()
   }
 
   /** Runs any pending recompute now. */
@@ -313,7 +337,7 @@ export class Store {
   }
 
   private recompute(): void {
-    this.state = { draft: this.state.draft, derived: derive(this.state.draft) }
+    this.state = { ...this.state, derived: derive(this.state.draft) }
     this.emit()
   }
 

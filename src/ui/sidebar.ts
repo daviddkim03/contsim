@@ -1,4 +1,5 @@
 import { h, query, setInvalid, setValue } from './dom'
+import { wireHover } from './legend'
 import {
   edits,
   exampleDraft,
@@ -72,6 +73,7 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
   const uprightCheckbox = query<HTMLInputElement>(root, '[data-field="keepUpright"]')
   const list = query<HTMLUListElement>(root, '.box-list')
   const empty = query<HTMLElement>(root, '.empty')
+  wireHover(list, '.box-row', store)
 
   // Text inputs: every keystroke is an edit.
   root.addEventListener('input', (event) => {

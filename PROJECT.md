@@ -301,7 +301,7 @@ The takeoff-tool screenshot is the layout and style reference: dark left sidebar
   - Doesn't fit (amber): "Placed 21 of 24. No arrangement found for the rest; it may still be possible. Try Optimize or reduce quantities."
   - Impossible (red): the reason from 4.1, for example "Total box volume 1,920 exceeds container volume 1,728" or "Box B (48 x 48 x 100) does not fit in the container in any orientation".
   - Fix inputs (grey): some field is invalid.
-- 3D view: container as a wireframe, boxes as solid colored cuboids with dark edges, one stable color per type. Hovering a legend row highlights that type. The layer slider hides every box whose bottom is above the chosen height so the user can look inside. The camera does not reset on recompute.
+- 3D view: container as a wireframe over a light floor, boxes as solid colored cuboids with dark edges, one stable color per type. Hovering a legend row or a sidebar row highlights that type (everything else fades). The layer slider hides every box whose bottom is above the chosen height so the user can look inside. The camera follows the container until the user first orbits; after that it only moves on Reset view or when the container dims change. A 3D / Table toggle swaps the center panel for the placement list. Rendering is on demand, not a loop. Without WebGL the app falls back to the table.
 - Unplaced boxes: shown in the legend as "7/10" and listed under the status.
 - Optimize: runs in the worker with a spinner and progress ("run 34 / 200"), can be cancelled. Result popover with per-type reductions, Apply / Discard. An objective dropdown next to the button (default keep-most-boxes).
 - Persistence: the current scenario is saved to localStorage on every change. Export / Import JSON. "Load example" restores the sample scenario.
@@ -350,7 +350,9 @@ contsim/
       sidebar.ts          container inputs, box list, options, Optimize button
       legend.ts           status panel + legend
       placementsTable.ts  placement list; the center panel until the 3D view exists
-      viewer3d.ts         three.js scene, colors, layer slider, highlight
+      stage.ts            center panel: toolbar (3D/Table, container toggle, layer slider, reset view)
+      viewer3d.ts         three.js scene, on-demand rendering, hover dimming, layer visibility
+      viewerMath.ts       pure helpers: core-to-scene mapping, layer predicate, aspect-aware framing
       optimizeWorker.ts   runs optimize() off the main thread
       palette.ts
     main.ts

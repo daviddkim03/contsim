@@ -29,6 +29,18 @@ function describeIssue(path: string, message: string, draft: Draft): string {
   return `${path}: ${message}`
 }
 
+/** Hovering a row highlights that box type in the 3D view. */
+export function wireHover(list: HTMLElement, rowSelector: string, store: Store): void {
+  list.addEventListener('mouseover', (event) => {
+    const row = (event.target as HTMLElement).closest<HTMLElement>(rowSelector)
+    const id = row?.dataset.id ?? null
+    if (store.get().view.hoverTypeId !== id) store.setView({ hoverTypeId: id })
+  })
+  list.addEventListener('mouseleave', () => {
+    if (store.get().view.hoverTypeId !== null) store.setView({ hoverTypeId: null })
+  })
+}
+
 export function mountLegend(root: HTMLElement, store: Store): Panel {
   root.innerHTML = `
     <section class="status" data-status="fits">
@@ -58,7 +70,7 @@ export function mountLegend(root: HTMLElement, store: Store): Panel {
     time: query<HTMLElement>(root, '[data-stat="time"]'),
   }
   const legendList = query<HTMLUListElement>(root, '.legend-list')
-  void store
+  wireHover(legendList, '.legend-row', store)
 
   function renderStatus(draft: Draft, derived: Derived): void {
     const { result, scenario, scale, issues } = derived

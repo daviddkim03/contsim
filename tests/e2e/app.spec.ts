@@ -20,7 +20,8 @@ test('opens on the example scenario, which does not fit', async ({ page }) => {
   await expect(page.locator('.box-row')).toHaveCount(5)
   await expect(page.locator('.legend-row')).toHaveCount(5)
   await expect(page.locator('.legend-row.short .legend-count')).toHaveText('25 / 40')
-  await expect(page.locator('tbody tr')).toHaveCount(123)
+  await expect(page.locator('.stage-3d canvas')).toBeVisible()
+  await expect(page.locator('.stage-3d')).toHaveAttribute('data-boxes', '123')
 })
 
 test('quantities update the result live and survive a reload', async ({ page }) => {
@@ -92,4 +93,48 @@ test('adding and removing box types', async ({ page }) => {
 
   await added.locator('[data-action="remove"]').click()
   await expect(page.locator('.box-row')).toHaveCount(5)
+})
+
+test('the table view lists every placement', async ({ page }) => {
+  await expect(page.locator('.stage-table')).toBeHidden()
+  await page.locator('[data-mode="table"]').click()
+  await expect(page.locator('.stage-table')).toBeVisible()
+  await expect(page.locator('.stage-3d')).toBeHidden()
+  await expect(page.locator('tbody tr')).toHaveCount(123)
+  await expect(page.locator('tbody tr').first()).toContainText('Pallet box')
+  await page.locator('[data-mode="3d"]').click()
+  await expect(page.locator('.stage-3d canvas')).toBeVisible()
+})
+
+test('the layer slider hides boxes above the chosen height', async ({ page }) => {
+  const slider = page.locator('[data-field="layer"]')
+  const label = page.locator('[data-role="layer-label"]')
+  await expect(label).toHaveText('Layer: all')
+  await expect(slider).toHaveAttribute('max', '94')
+
+  await slider.evaluate((el: HTMLInputElement) => {
+    el.value = '0'
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await expect(label).toHaveText('Layer: up to 0 in')
+  const floorBoxes = Number(await page.locator('.stage-3d').getAttribute('data-boxes'))
+  expect(floorBoxes).toBeGreaterThan(0)
+  expect(floorBoxes).toBeLessThan(123)
+
+  await slider.evaluate((el: HTMLInputElement) => {
+    el.value = el.max
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await expect(label).toHaveText('Layer: all')
+  await expect(page.locator('.stage-3d')).toHaveAttribute('data-boxes', '123')
+})
+
+test('hovering a legend or sidebar row highlights that box type', async ({ page }) => {
+  const stage = page.locator('.stage-3d')
+  await page.locator('.legend-row').nth(2).hover()
+  await expect(stage).toHaveAttribute('data-hover', 'medium')
+  await page.locator('.box-row').nth(1).hover()
+  await expect(stage).toHaveAttribute('data-hover', 'crate')
+  await page.locator('.status').hover()
+  await expect(stage).toHaveAttribute('data-hover', '')
 })

@@ -1,6 +1,6 @@
 import './style.css'
 import { mountLegend } from './ui/legend'
-import { mountPlacementsTable } from './ui/placementsTable'
+import { mountStage } from './ui/stage'
 import { mountSidebar } from './ui/sidebar'
 import { Store, loadDraft } from './ui/state'
 import { query } from './ui/dom'
@@ -27,7 +27,7 @@ const storage = (() => {
 const store = new Store(loadDraft(storage), storage)
 const panels = [
   mountSidebar(query(app, '#sidebar'), store),
-  mountPlacementsTable(query(app, '#stage'), store),
+  mountStage(query(app, '#stage'), store),
   mountLegend(query(app, '#side'), store),
 ]
 
