@@ -1,7 +1,9 @@
 import type { Objective } from '../core'
-import { h, query, setInvalid, setValue, setText } from './dom'
+import { OBJECTIVE_LABELS } from './describe'
+import { download, h, query, setInvalid, setValue, setText } from './dom'
 import { wireHover } from './legend'
 import type { OptimizeController } from './optimizeClient'
+import { buildReport, EXCEL_FILENAME } from './report'
 import {
   edits,
   exampleDraft,
@@ -14,6 +16,7 @@ import {
   type TypeField,
 } from './state'
 import { UNITS, type Unit } from './units'
+import { writeXlsx, XLSX_MIME } from './xlsx'
 
 export interface Panel {
   render(state: AppState): void
@@ -21,12 +24,8 @@ export interface Panel {
 
 const CONTAINER_KEYS: ContainerKey[] = ['l', 'w', 'h']
 const TYPE_FIELDS: TypeField[] = ['name', 'l', 'w', 'h', 'qty']
-const OBJECTIVES: { value: Objective; label: string }[] = [
-  { value: 'keep-most-boxes', label: 'Keep most boxes' },
-  { value: 'keep-most-volume', label: 'Keep most volume' },
-  { value: 'cut-evenly', label: 'Cut evenly' },
-]
-export const EXPORT_FILENAME = 'contsim-scenario.json'
+const OBJECTIVES = Object.entries(OBJECTIVE_LABELS) as [Objective, string][]
+export const JSON_FILENAME = 'contsim-scenario.json'
 
 export function mountSidebar(
   root: HTMLElement,
@@ -77,14 +76,15 @@ export function mountSidebar(
       <div class="optimize-row">
         <button type="button" class="primary" data-action="optimize">Optimize</button>
         <select data-field="objective" aria-label="Optimize objective">
-          ${OBJECTIVES.map((o) => `<option value="${o.value}">${o.label}</option>`).join('')}
+          ${OBJECTIVES.map(([value, label]) => `<option value="${value}">${label}</option>`).join('')}
         </select>
       </div>
       <button type="button" class="ghost" data-action="cancel-optimize" hidden>Cancel</button>
       <div class="file-row">
         <button type="button" class="ghost" data-action="example">Load example</button>
-        <button type="button" class="ghost" data-action="export">Export JSON</button>
         <button type="button" class="ghost" data-action="import">Import JSON</button>
+        <button type="button" class="ghost" data-action="export-json">Export JSON</button>
+        <button type="button" class="ghost" data-action="export-excel">Export Excel</button>
         <input type="file" accept="application/json,.json" data-field="import-file" hidden>
       </div>
       <p class="hint" data-role="footer-hint">Results update as you type</p>
@@ -102,6 +102,7 @@ export function mountSidebar(
   const cancelButton = query<HTMLButtonElement>(root, '[data-action="cancel-optimize"]')
   const objectiveSelect = query<HTMLSelectElement>(root, '[data-field="objective"]')
   const importInput = query<HTMLInputElement>(root, '[data-field="import-file"]')
+  const excelButton = query<HTMLButtonElement>(root, '[data-action="export-excel"]')
   const footerHint = query<HTMLElement>(root, '[data-role="footer-hint"]')
   let notice: string | null = null
   wireHover(list, '.box-row', store)
@@ -175,8 +176,14 @@ export function mountSidebar(
         }
         break
       }
-      case 'export':
-        exportFile()
+      case 'export-json':
+        download(
+          new Blob([serializeDraft(store.get().draft)], { type: 'application/json' }),
+          JSON_FILENAME,
+        )
+        break
+      case 'export-excel':
+        void exportExcel()
         break
       case 'import':
         importInput.value = ''
@@ -185,12 +192,12 @@ export function mountSidebar(
     }
   })
 
-  function exportFile(): void {
-    const blob = new Blob([serializeDraft(store.get().draft)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const link = h('a', { href: url, download: EXPORT_FILENAME })
-    link.click()
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  async function exportExcel(): Promise<void> {
+    // A recompute may still be pending after a keystroke; the report must match the inputs.
+    store.flush()
+    const workbook = buildReport(store.get())
+    if (!workbook) return
+    download(new Blob([await writeXlsx(workbook)], { type: XLSX_MIME }), EXCEL_FILENAME)
   }
 
   async function importFile(file: File | undefined): Promise<void> {
@@ -277,6 +284,7 @@ export function mountSidebar(
       running ? `Optimizing ${optimize.runs} / ${optimize.maxRuns}` : 'Optimize',
     )
     cancelButton.hidden = !running
+    excelButton.disabled = !result
     setValue(objectiveSelect, optimize.objective)
     objectiveSelect.disabled = running
     footerHint.classList.toggle('error', notice !== null)

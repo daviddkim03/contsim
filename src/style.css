@@ -783,13 +783,23 @@ button.primary:disabled {
 /* Phase 6 polish ---------------------------------------------------------- */
 
 .file-row {
-  display: flex;
-  justify-content: center;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 4px;
 }
 
 .file-row button {
   font-size: 12px;
+}
+
+button.ghost:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+button.ghost:disabled:hover {
+  color: var(--sidebar-muted);
+  background: transparent;
 }
 
 .hint.error {

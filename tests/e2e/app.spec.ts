@@ -1,4 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
+import { readFile } from 'node:fs/promises'
+import { readSheet, text, unzip } from '../helpers/unzip'
 
 const badge = (page: Page) => page.locator('.badge')
 const row = (page: Page, index: number) => page.locator('.box-row').nth(index)
@@ -172,7 +174,7 @@ test('Discard keeps the current quantities', async ({ page }) => {
 
 test('export downloads the scenario and import restores it', async ({ page }) => {
   const downloadPromise = page.waitForEvent('download')
-  await page.locator('[data-action="export"]').click()
+  await page.locator('[data-action="export-json"]').click()
   const download = await downloadPromise
   expect(download.suggestedFilename()).toBe('contsim-scenario.json')
   const path = await download.path()
@@ -182,6 +184,41 @@ test('export downloads the scenario and import restores it', async ({ page }) =>
   await page.locator('[data-field="import-file"]').setInputFiles(path)
   await expect(qty(page, 0)).toHaveValue('12')
   await expect(badge(page)).toHaveText("Doesn't fit")
+})
+
+test('Export Excel downloads a workbook with summary, boxes and placements', async ({ page }) => {
+  const downloadPromise = page.waitForEvent('download')
+  await page.locator('[data-action="export-excel"]').click()
+  const download = await downloadPromise
+  expect(download.suggestedFilename()).toBe('contsim-packing.xlsx')
+  const parts = unzip(new Uint8Array(await readFile((await download.path())!)))
+
+  expect(text(parts.get('xl/workbook.xml')!)).toContain(
+    '<sheet name="Summary" sheetId="1" r:id="rId1"/>' +
+      '<sheet name="Boxes" sheetId="2" r:id="rId2"/>' +
+      '<sheet name="Placements" sheetId="3" r:id="rId3"/>',
+  )
+  const summary = readSheet(text(parts.get('xl/worksheets/sheet1.xml')!))
+  expect(summary).toContainEqual(['Status', "Doesn't fit"])
+  expect(summary).toContainEqual(['Container length (in)', 232])
+  expect(summary).toContainEqual(['Boxes placed', 123])
+  const boxes = readSheet(text(parts.get('xl/worksheets/sheet2.xml')!))
+  expect(boxes).toHaveLength(6)
+  expect(boxes[3]!.slice(1, 9)).toEqual(['Medium carton', '#10b981', 24, 18, 18, 40, 25, 15])
+  const placements = readSheet(text(parts.get('xl/worksheets/sheet3.xml')!))
+  expect(placements).toHaveLength(124)
+  expect(placements[1]!.slice(0, 5)).toEqual([1, 'Pallet box', 0, 0, 0])
+  expect([...(placements[1]!.slice(5, 8) as number[])].sort((a, b) => a - b)).toEqual([40, 48, 48])
+})
+
+test('Export Excel waits for the inputs to be valid', async ({ page }) => {
+  const button = page.locator('[data-action="export-excel"]')
+  await expect(button).toBeEnabled()
+  await page.locator('[data-field="container.l"]').fill('abc')
+  await expect(badge(page)).toHaveText('Fix inputs')
+  await expect(button).toBeDisabled()
+  await page.locator('[data-field="container.l"]').fill('232')
+  await expect(button).toBeEnabled()
 })
 
 test('importing a file that is not a scenario changes nothing and says so', async ({ page }) => {

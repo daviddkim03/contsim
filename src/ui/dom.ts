@@ -35,6 +35,13 @@ export function setInvalid(input: HTMLElement, message: string | undefined): voi
   }
 }
 
+/** Offers a file to the user through a temporary object URL. */
+export function download(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
+  h('a', { href: url, download: filename }).click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
 export function query<T extends Element>(root: ParentNode, selector: string): T {
   const el = root.querySelector<T>(selector)
   if (!el) throw new Error(`Missing element: ${selector}`)

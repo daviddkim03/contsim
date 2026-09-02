@@ -18,6 +18,8 @@ This file is both the spec and the build plan. Each phase in section 8 is writte
 
 All six phases were built and verified on 2026-08-28: 116 unit tests, 14 Playwright tests against the production build, lint and typecheck green. Deployment is a static `dist/` folder (README.md). Deviations from the original plan are noted inline in the sections below.
 
+Added on 2026-09-02: Export Excel (a dependency-free .xlsx writer, section 5.4) and a GitHub Actions workflow that runs the checks and deploys to GitHub Pages.
+
 ## 1. Goals and non-goals
 
 Goals (v1):
@@ -308,12 +310,22 @@ The takeoff-tool screenshot is the layout and style reference: dark left sidebar
 - 3D view: container as a wireframe over a light floor, boxes as solid colored cuboids with dark edges, one stable color per type. Hovering a legend row or a sidebar row highlights that type (everything else fades). The layer slider hides every box whose bottom is above the chosen height so the user can look inside. The camera follows the container until the user first orbits; after that it only moves on Reset view or when the container dims change. A 3D / Table toggle swaps the center panel for the placement list. Rendering is on demand, not a loop. Without WebGL the app falls back to the table.
 - Unplaced boxes: shown in the legend as "7/10" and listed under the status.
 - Optimize: runs in a Web Worker; the button shows progress ("Optimizing 34 / 200") and a Cancel button appears (cancel terminates the worker). The result popover (bottom-left of the stage) lists per-type reductions ("40 -> 25") with Apply / Discard, and the 3D view and table preview the proposed packing until the user decides. Any edit discards a pending proposal. An objective dropdown sits next to the button (default keep-most-boxes). Measured on the example: keep-most-boxes removes 2 pallet boxes and keeps 136 of 138, in well under a second.
-- Persistence: the current scenario is saved to localStorage on every change. Export JSON downloads `contsim-scenario.json`; Import JSON reads one back (a file that is not a scenario shows a message and changes nothing). "Load example" restores the sample scenario after a confirmation.
+- Persistence: the current scenario is saved to localStorage on every change. Export JSON downloads `contsim-scenario.json`; Import JSON reads one back (a file that is not a scenario shows a message and changes nothing). "Load example" restores the sample scenario after a confirmation. Export Excel downloads `contsim-packing.xlsx` (section 5.4).
 - Validation: non-numeric, zero, negative, or absurdly large dims mark the field invalid; the packer does not run; status shows "Fix inputs". Never crash on bad input.
 
 ### 5.3 Style
 
 Dark sidebar, light canvas background, amber primary button, muted secondary buttons, monospace for numbers. Plain CSS, no component library. Be picky: aligned inputs, consistent spacing, no layout jumps when the status changes.
+
+### 5.4 Excel export
+
+Export Excel writes what the screen shows, so a colleague without the app gets the whole picture. Three sheets, all numbers in the display unit and volumes in cu ft or m³:
+
+- Summary: exported at, status and details (the same wording as the badge), unit, container dims and volume, keep upright, boxes requested / placed / left out, fill, placed volume, packing time, and a note explaining the placement coordinates. While an Optimize proposal is on screen the status is "Optimize proposal" and the optimizer's runs and time are listed.
+- Boxes: one row per type: name, color, dims, requested, placed, left out, volume each, placed volume, share of the container.
+- Placements: one row per placed box in placement order: box, x, y, z (min corner), oriented length, width, height, and top (z + height).
+
+The writer is in-house (`src/ui/xlsx.ts` + `src/ui/zip.ts`, about 300 lines): SpreadsheetML with inline strings, a bold frozen header row, column widths, and a percent number format, packaged in a ZIP that deflates through the browser's CompressionStream (stored when unavailable). The available libraries were rejected on purpose: SheetJS on npm is stale with open advisories, and ExcelJS is larger than three.js. The subset of the format used here has not changed since 2006. Tests read the file back with an independent ZIP reader that checks every CRC with Node's zlib, and the e2e test downloads a real file from the production build.
 
 ## 6. Tech stack
 
@@ -321,7 +333,7 @@ Dark sidebar, light canvas background, amber primary button, muted secondary but
 - three.js for the 3D view (BoxGeometry + EdgesGeometry per box, InstancedMesh only if it ever gets slow; OrbitControls from `three/addons/controls/OrbitControls.js`). The only runtime dependency.
 - Vitest for unit tests of the core and the pure UI modules. Playwright (`npm run test:e2e`) drives the production build in Chromium; it was pulled forward from Phase 6 so every UI phase is verified in a real browser.
 - ESLint + Prettier. `npm run lint` and `npm test` must stay green at every commit.
-- Static deploy (GitHub Pages, Netlify, any static host). No backend, no database, no accounts.
+- Static deploy (GitHub Pages, Netlify, any static host). No backend, no database, no accounts. `.github/workflows/deploy.yml` runs lint, unit and e2e tests on every push and pull request and publishes to GitHub Pages from main, building with `--base /<repo>/`.
 - Worker: `new Worker(new URL('./optimizeWorker.ts', import.meta.url), { type: 'module' })`; Vite bundles it.
 
 Zero-dependency alternative for rendering: an isometric 2D canvas (each cuboid is three parallelograms, painter's sort by x+y+z). Only worth it if "no dependencies at all" is a hard requirement; three.js gives orbit and zoom for free and is the better experience.
@@ -349,7 +361,8 @@ contsim/
     ui/
       state.ts            scenario state, reducers, validation, localStorage, JSON import/export
       units.ts            unit labels, integer scaling at the boundary, formatting
-      dom.ts              tiny DOM helpers (h, setValue, setInvalid)
+      dom.ts              tiny DOM helpers (h, setValue, setInvalid, download)
+      describe.ts         status wording and objective labels shared by legend, sidebar and report
       palette.ts          box type colors
       sidebar.ts          container inputs, box list, options, Optimize button
       legend.ts           status panel + legend
@@ -357,6 +370,9 @@ contsim/
       stage.ts            center panel: toolbar (3D/Table, container toggle, layer slider, reset view)
       viewer3d.ts         three.js scene, on-demand rendering, hover dimming, layer visibility
       viewerMath.ts       pure helpers: core-to-scene mapping, layer predicate, aspect-aware framing
+      report.ts           the Excel report: Summary, Boxes and Placements sheets from the state
+      xlsx.ts             minimal SpreadsheetML writer (typed cells, header style, percent format)
+      zip.ts              minimal ZIP writer (CRC-32, deflate via CompressionStream or stored)
       optimizeWorker.ts   runs optimize() off the main thread
       optimizeProtocol.ts request / progress / done / error message types
       optimizeClient.ts   spawns the worker, mirrors progress into the store, cancel = terminate
@@ -366,6 +382,7 @@ contsim/
     core/                 geometry, feasibility, validate, ordering, packer, optimizer tests
     ui/                   units and state tests
     e2e/                  Playwright smoke tests against the production build (npm run test:e2e)
+    helpers/              independent ZIP and worksheet readers used to verify exports
     core/fixtures.ts      synthetic scenarios (tiny, rotation, pinwheel, perf300) and packingViolation()
 ```
 

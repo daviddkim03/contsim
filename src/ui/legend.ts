@@ -1,33 +1,10 @@
-import { describeImpossibility } from '../core'
 import { h, query, setText } from './dom'
+import { summarizeStatus } from './describe'
 import type { AppState, Derived, Draft, Store } from './state'
 import type { Panel } from './sidebar'
-import { formatLength, formatNumber, formatVolume } from './units'
-
-type Level = 'fits' | 'not-found' | 'impossible' | 'invalid'
-
-const LABELS: Record<Level, string> = {
-  fits: 'Fits',
-  'not-found': "Doesn't fit",
-  impossible: 'Impossible',
-  invalid: 'Fix inputs',
-}
+import { formatNumber, formatVolume } from './units'
 
 const percent = (fraction: number) => `${(fraction * 100).toFixed(1)} %`
-
-/** Turns a validation path such as "types[1].dims.h" into "Box name H". */
-function describeIssue(path: string, message: string, draft: Draft): string {
-  const container = /^container\.(l|w|h)$/.exec(path)
-  if (container) return `Container ${container[1]!.toUpperCase()}: ${message}`
-  const type = /^types\[(\d+)\]\.(?:dims\.(l|w|h)|(qty)|(id))$/.exec(path)
-  if (type) {
-    const t = draft.types[Number(type[1])]
-    const name = t?.name.trim() || `Box ${Number(type[1]) + 1}`
-    const field = type[2] ? type[2].toUpperCase() : type[3] ? 'quantity' : 'id'
-    return `${name} ${field}: ${message}`
-  }
-  return `${path}: ${message}`
-}
 
 /** Hovering a row highlights that box type in the 3D view. */
 export function wireHover(list: HTMLElement, rowSelector: string, store: Store): void {
@@ -73,44 +50,13 @@ export function mountLegend(root: HTMLElement, store: Store): Panel {
   wireHover(legendList, '.legend-row', store)
 
   function renderStatus(draft: Draft, derived: Derived): void {
-    const { result, scenario, scale, issues } = derived
+    const { result, scale } = derived
     const unit = draft.unit
-    const lines: string[] = []
-    let level: Level
-    let text: string
-
-    if (!result || !scenario) {
-      level = 'invalid'
-      const entries = Object.entries(issues)
-      text =
-        entries.length === 1
-          ? 'One field needs attention.'
-          : `${entries.length} fields need attention.`
-      for (const [path, msg] of entries.slice(0, 4)) lines.push(describeIssue(path, msg, draft))
-    } else if (result.status === 'fits') {
-      level = 'fits'
-      text =
-        result.stats.requested === 0
-          ? 'Add a box type to get started.'
-          : `All ${result.stats.requested} boxes placed.`
-    } else if (result.status === 'not-found') {
-      level = 'not-found'
-      text = `Placed ${result.stats.placed} of ${result.stats.requested}. No arrangement found for the rest; it may still be possible. Try Optimize or reduce quantities.`
-      for (const t of scenario.types) {
-        const n = result.unplaced[t.id]
-        if (n) lines.push(`${t.name}: ${n} left out`)
-      }
-    } else {
-      level = 'impossible'
-      text = describeImpossibility(result.impossibility!, scenario.types, {
-        length: (n) => formatLength(n, scale, unit),
-        volume: (n) => formatVolume(n, scale, unit),
-      })
-    }
+    const { level, label, text, lines } = summarizeStatus(draft, derived)
 
     status.dataset.status = level
     status.classList.toggle('stale', derived.stale)
-    setText(badge, LABELS[level])
+    setText(badge, label)
     setText(message, text)
     details.replaceChildren(...lines.map((line) => h('li', { text: line })))
     details.hidden = lines.length === 0

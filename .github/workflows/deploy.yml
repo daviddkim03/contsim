@@ -1,0 +1,68 @@
+# Runs the full check suite on every push and pull request, and publishes the
+# production build to GitHub Pages on every push to main.
+#
+# One-time setup in the repository settings: Pages -> Build and deployment ->
+# Source: "GitHub Actions". The site is then served at
+# https://<user>.github.io/<repo>/ and updated on every push to main.
+
+name: CI and deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Build for the Pages URL
+        # A project site lives under /<repo>/; a user site (<user>.github.io) lives at the root.
+        run: |
+          case "$REPO" in
+            *.github.io) BASE=/ ;;
+            *) BASE="/$REPO/" ;;
+          esac
+          npm run build -- --base "$BASE"
+        env:
+          REPO: ${{ github.event.repository.name }}
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - id: deployment
+        uses: actions/deploy-pages@v4

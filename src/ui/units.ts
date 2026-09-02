@@ -54,19 +54,32 @@ export function formatLength(int: number, scale: number, unit: Unit): string {
   return `${formatNumber(int, scale)} ${unit}`
 }
 
+export interface Volume {
+  value: number
+  /** Display unit: "cu ft" or "m³". */
+  unit: string
+  /** Decimals worth showing in that unit. */
+  decimals: number
+}
+
 /** Cubic units are unwieldy in inches or millimetres, so volumes are shown in cubic feet or cubic metres. */
-export function formatVolume(int: number, scale: number, unit: Unit): string {
+export function volumeOf(int: number, scale: number, unit: Unit): Volume {
   const cubic = int / scale ** 3
   switch (unit) {
     case 'in':
-      return `${number(cubic / 1728, 1)} cu ft`
+      return { value: cubic / 1728, unit: 'cu ft', decimals: 1 }
     case 'ft':
-      return `${number(cubic, 1)} cu ft`
+      return { value: cubic, unit: 'cu ft', decimals: 1 }
     case 'cm':
-      return `${number(cubic / 1e6, 2)} m³`
+      return { value: cubic / 1e6, unit: 'm³', decimals: 2 }
     case 'mm':
-      return `${number(cubic / 1e9, 2)} m³`
+      return { value: cubic / 1e9, unit: 'm³', decimals: 2 }
     case 'm':
-      return `${number(cubic, 2)} m³`
+      return { value: cubic, unit: 'm³', decimals: 2 }
   }
+}
+
+export function formatVolume(int: number, scale: number, unit: Unit): string {
+  const v = volumeOf(int, scale, unit)
+  return `${number(v.value, v.decimals)} ${v.unit}`
 }
