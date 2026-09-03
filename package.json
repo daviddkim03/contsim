@@ -13,7 +13,8 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "lint": "eslint . && prettier --check .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "catalog": "node scripts/import-catalog.ts"
   },
   "dependencies": {
     "three": "^0.185.1"

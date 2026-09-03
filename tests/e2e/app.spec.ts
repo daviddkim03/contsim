@@ -103,22 +103,67 @@ test('a standard container fills the dimensions and locks them', async ({ page }
   await expect(length).toHaveValue('12032')
 })
 
-test('adding and removing box types', async ({ page }) => {
+test('adding a box: pick a cabinet from the catalog by code', async ({ page }) => {
   await page.locator('[data-action="add"]').click()
   await expect(page.locator('.box-row')).toHaveCount(6)
   const added = row(page, 5)
-  await expect(added.locator('[data-field="name"]')).toHaveValue('Box A')
+  const search = added.locator('[data-field="search"]')
+  await expect(search).toBeFocused()
+  await expect(badge(page)).toHaveText('Fix inputs')
+  await expect(page.locator('.details li')).toHaveText(['Box 6: Pick a cabinet from the catalog'])
+  const options = page.locator('#combobox-list .combobox-option')
+  await expect(page.locator('#combobox-list')).toBeVisible()
+  await expect(options).toHaveCount(41)
+  await expect(page.locator('#combobox-list .combobox-more')).toContainText('134 more')
+
+  await search.fill('3036')
+  await expect(options).toHaveCount(2)
+  await expect(options.first()).toContainText('3036')
+  await expect(options.first()).toContainText('30 × 12 × 36 in')
+  await search.press('Enter')
+  await expect(page.locator('#combobox-list')).toBeHidden()
+  await expect(search).toHaveValue('3036')
+  await expect(added.locator('[data-role="dims"]')).toHaveText('30 × 12 × 36 in')
+  await expect(added.locator('[data-field="qty"]')).toBeFocused()
+  await expect(badge(page)).toHaveText("Doesn't fit")
+  await expect(page.locator('.legend-row').nth(5)).toContainText('3036')
+
+  await added.locator('[data-action="remove"]').click()
+  await expect(page.locator('.box-row')).toHaveCount(5)
+})
+
+test('adding a box: search by size, or enter a custom size', async ({ page }) => {
+  await page.locator('[data-action="add"]').click()
+  const added = row(page, 5)
+  const search = added.locator('[data-field="search"]')
+  const options = page.locator('#combobox-list .combobox-option')
+  await search.fill('36 x 12 x 30')
+  await expect(options.first()).toContainText('3036')
+  await search.press('ArrowDown')
+  await options.nth(1).click()
+  await expect(search).not.toHaveValue('36 x 12 x 30')
+  await expect(added.locator('[data-role="dims"]')).toBeVisible()
+
+  await search.fill('Crate')
+  await expect(options).toHaveCount(1)
+  await expect(options.first()).toHaveText('Custom size "Crate"')
+  await options.first().click()
+  await expect(added).toHaveAttribute('data-kind', 'custom')
+  await expect(search).toHaveValue('Crate')
   await expect(added.locator('[data-field="l"]')).toBeFocused()
   await expect(badge(page)).toHaveText('Fix inputs')
-
   await added.locator('[data-field="l"]').fill('10')
   await added.locator('[data-field="w"]').fill('10')
   await added.locator('[data-field="h"]').fill('10')
   await expect(badge(page)).toHaveText("Doesn't fit")
-  await expect(page.locator('.legend-row')).toHaveCount(6)
+  await expect(page.locator('.legend-row').nth(5)).toContainText('Crate')
 
-  await added.locator('[data-action="remove"]').click()
-  await expect(page.locator('.box-row')).toHaveCount(5)
+  // Blurring the name in a custom row keeps the typed name.
+  await search.fill('Crate B')
+  await search.press('Tab')
+  await expect(page.locator('.legend-row').nth(5)).toContainText('Crate B')
+  await page.reload()
+  await expect(row(page, 5).locator('[data-field="search"]')).toHaveValue('Crate B')
 })
 
 test('the table view lists every placement', async ({ page }) => {

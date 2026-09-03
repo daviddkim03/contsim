@@ -1,4 +1,6 @@
 import type { Objective } from '../core'
+import { findCatalogItem, formatCatalogDims, searchCatalog } from './catalogSearch'
+import { attachCombobox } from './combobox'
 import { OBJECTIVE_LABELS } from './describe'
 import { download, h, query, setInvalid, setValue, setText } from './dom'
 import { wireHover } from './legend'
@@ -26,6 +28,9 @@ export interface Panel {
 
 const CONTAINER_KEYS: ContainerKey[] = ['l', 'w', 'h']
 const TYPE_FIELDS: TypeField[] = ['name', 'l', 'w', 'h', 'qty']
+const DIM_FIELDS: TypeField[] = ['l', 'w', 'h']
+/** Option id of the "Custom size" entry at the end of every catalog search. */
+const CUSTOM_OPTION = '\u0000custom'
 const OBJECTIVES = Object.entries(OBJECTIVE_LABELS) as [Objective, string][]
 export const JSON_FILENAME = 'contsim-scenario.json'
 
@@ -161,7 +166,7 @@ export function mountSidebar(
     switch (button.dataset.action) {
       case 'add':
         store.edit((d) => edits.addType(d))
-        list.querySelector<HTMLInputElement>('li:last-child input[data-field="l"]')?.focus()
+        list.querySelector<HTMLInputElement>('li:last-child input[data-field="search"]')?.focus()
         break
       case 'remove':
         if (id) store.edit((d) => edits.removeType(d, id))
@@ -228,11 +233,12 @@ export function mountSidebar(
     row.innerHTML = `
       <div class="row-top">
         <span class="swatch"></span>
-        <input class="name" data-field="name" placeholder="Name" autocomplete="off" aria-label="Box name">
+        <input class="name" data-field="search" placeholder="Search by code or size" autocomplete="off" aria-label="Box type">
         <button type="button" class="icon" data-action="remove" aria-label="Remove box" title="Remove box">×</button>
       </div>
       <div class="row-bottom">
-        <div class="dims compact">
+        <span class="row-dims" data-role="dims"></span>
+        <div class="dims compact" data-role="custom-dims">
           <input data-field="l" inputmode="decimal" placeholder="L" autocomplete="off" aria-label="Length">
           <span class="times">×</span>
           <input data-field="w" inputmode="decimal" placeholder="W" autocomplete="off" aria-label="Width">
@@ -246,6 +252,54 @@ export function mountSidebar(
         </div>
       </div>
     `
+    const search = query<HTMLInputElement>(row, '[data-field="search"]')
+    const current = () => store.get().draft.types.find((t) => t.id === id)
+    const focus = (selector: string) => {
+      const input = row.querySelector<HTMLInputElement>(selector)
+      input?.focus()
+      input?.select()
+    }
+    attachCombobox(search, {
+      search(text) {
+        const unit = store.get().draft.unit
+        const { items, more } = searchCatalog(text, unit)
+        const typed = text.trim()
+        return {
+          options: [
+            ...items.map((item) => ({
+              id: item.code,
+              label: item.code,
+              detail: formatCatalogDims(item, unit),
+            })),
+            {
+              id: CUSTOM_OPTION,
+              label: typed ? `Custom size "${typed}"` : 'Custom size…',
+              action: true,
+            },
+          ],
+          more,
+          // In a custom row the text is the box's name, so Enter must not pick a match by accident.
+          active: current()?.kind === 'custom' ? -1 : 0,
+        }
+      },
+      onSelect(option, text) {
+        if (option.id === CUSTOM_OPTION) {
+          store.edit((d) => edits.setCustom(d, id, text))
+          search.value = current()?.name ?? text
+          focus('[data-field="l"]')
+        } else {
+          store.edit((d) => edits.setCatalogItem(d, id, option.id))
+          search.value = option.id
+          focus('[data-field="qty"]')
+        }
+      },
+      onDismiss(text) {
+        const type = current()
+        if (!type) return
+        if (type.kind === 'custom') store.edit((d) => edits.setTypeField(d, id, 'name', text))
+        else search.value = type.catalogCode
+      },
+    })
     return row
   }
 
@@ -254,14 +308,42 @@ export function mountSidebar(
     type: BoxTypeDraft,
     index: number,
     issues: Record<string, string>,
+    unit: Unit,
   ): void {
+    row.dataset.kind = type.kind
     query<HTMLElement>(row, '.swatch').style.background = type.color
-    for (const field of TYPE_FIELDS) {
+    const search = query<HTMLInputElement>(row, '[data-field="search"]')
+    // While the user is typing a search, the text is theirs, not the store's.
+    if (document.activeElement !== search) {
+      setValue(search, type.kind === 'catalog' ? type.catalogCode : type.name)
+    }
+    setInvalid(search, issues[`types[${index}].catalog`])
+
+    const item = type.kind === 'catalog' ? findCatalogItem(type.catalogCode) : null
+    const dimsText = query<HTMLElement>(row, '[data-role="dims"]')
+    const customDims = query<HTMLElement>(row, '[data-role="custom-dims"]')
+    dimsText.hidden = type.kind !== 'catalog'
+    customDims.hidden = type.kind !== 'custom'
+    setText(
+      dimsText,
+      item
+        ? formatCatalogDims(item, unit)
+        : type.catalogCode
+          ? 'Not in the catalog'
+          : 'Pick a cabinet from the list',
+    )
+    dimsText.classList.toggle('muted', !item)
+    for (const field of DIM_FIELDS) {
       const input = query<HTMLInputElement>(row, `[data-field="${field}"]`)
       setValue(input, type[field])
-      const path = field === 'qty' ? `types[${index}].qty` : `types[${index}].dims.${field}`
-      setInvalid(input, field === 'name' ? undefined : issues[path])
+      setInvalid(
+        input,
+        type.kind === 'custom' ? issues[`types[${index}].dims.${field}`] : undefined,
+      )
     }
+    const qty = query<HTMLInputElement>(row, '[data-field="qty"]')
+    setValue(qty, type.qty)
+    setInvalid(qty, issues[`types[${index}].qty`])
   }
 
   function render(state: AppState): void {
@@ -292,7 +374,7 @@ export function mountSidebar(
       if (row) existing.delete(type.id)
       else row = createRow(type.id)
       if (list.children[index] !== row) list.insertBefore(row, list.children[index] ?? null)
-      updateRow(row, type, index, derived.issues)
+      updateRow(row, type, index, derived.issues, draft.unit)
     })
     for (const row of existing.values()) row.remove()
     empty.hidden = draft.types.length > 0

@@ -69,7 +69,19 @@ describe('derive', () => {
     const draft: Draft = {
       containerType: 'custom',
       container: { l: '', w: '-', h: '9'.repeat(30) },
-      types: [{ id: 'x', name: '', l: '.', w: '1', h: '1', qty: '-3', color: '#000' }],
+      types: [
+        {
+          id: 'x',
+          kind: 'custom',
+          catalogCode: '',
+          name: '',
+          l: '.',
+          w: '1',
+          h: '1',
+          qty: '-3',
+          color: '#000',
+        },
+      ],
       keepUpright: true,
       unit: 'mm',
     }
@@ -109,12 +121,73 @@ describe('container presets', () => {
   })
 })
 
+describe('catalog rows', () => {
+  it('a new row waits for a catalog pick and reports only that', () => {
+    const draft = edits.addType(mixed())
+    const added = draft.types[5]!
+    expect(added).toMatchObject({ kind: 'catalog', catalogCode: '', name: '', qty: '1' })
+    const d = derive(draft)
+    expect(d.issues).toEqual({ 'types[5].catalog': 'Pick a cabinet from the catalog' })
+    expect(d.result).toBeNull()
+  })
+
+  it('takes name and size from the catalog in the chosen unit', () => {
+    let draft = edits.addType(mixed())
+    const id = draft.types[5]!.id
+    draft = edits.setCatalogItem(draft, id, '3036')
+    expect(draft.types[5]).toMatchObject({
+      kind: 'catalog',
+      catalogCode: '3036',
+      name: '3036',
+      l: '30',
+      w: '12',
+      h: '36',
+    })
+    let d = derive(draft)
+    expect(d.issues).toEqual({})
+    expect(d.scenario?.types[5]).toMatchObject({ name: '3036', dims: { l: 30, w: 12, h: 36 } })
+
+    d = derive(edits.setUnit(draft, 'mm'))
+    expect(d.scale).toBe(10)
+    expect(d.scenario?.types[5]?.dims).toEqual({ l: 7620, w: 3048, h: 9144 })
+  })
+
+  it('flags a code that is not in the catalog', () => {
+    let draft = edits.addType(mixed())
+    draft = edits.setCatalogItem(draft, draft.types[5]!.id, 'XX99')
+    expect(derive(draft).issues).toEqual({ 'types[5].catalog': 'Not in the catalog' })
+  })
+
+  it('switches to a custom box, keeping the picked size as a starting point', () => {
+    let draft = edits.addType(mixed())
+    const id = draft.types[5]!.id
+    draft = edits.setCatalogItem(draft, id, '3036')
+    draft = edits.setCustom(draft, id, '  Special ')
+    expect(draft.types[5]).toMatchObject({ kind: 'custom', name: 'Special', l: '30', w: '12' })
+    expect(derive(draft).scenario?.types[5]?.name).toBe('Special')
+    const fresh = edits.addType(mixed())
+    const unnamed = edits.setCustom(fresh, fresh.types[5]!.id, '')
+    expect(unnamed.types[5]?.name).toBe('Box A')
+  })
+
+  it('parses rows saved before the catalog as custom and rejects bad kinds', () => {
+    const legacy = mixed().types.map(({ kind: _k, catalogCode: _c, ...rest }) => {
+      void _k
+      void _c
+      return rest
+    })
+    const parsed = parseDraft(JSON.stringify({ ...mixed(), types: legacy }))
+    expect(parsed?.types[0]).toMatchObject({ kind: 'custom', catalogCode: '' })
+    const bad = { ...mixed(), types: [{ ...mixed().types[0], kind: 'magic' }] }
+    expect(parseDraft(JSON.stringify(bad))).toBeNull()
+  })
+})
+
 describe('edits', () => {
-  it('addType appends a box with a fresh id, name and color', () => {
+  it('addType appends a box with a fresh id and color', () => {
     const draft = edits.addType(mixed())
     const added = draft.types[5]!
     expect(draft.types).toHaveLength(6)
-    expect(added.name).toBe('Box A')
     expect(added.qty).toBe('1')
     expect(new Set(draft.types.map((t) => t.id)).size).toBe(6)
     expect(mixed().types.map((t) => t.color)).not.toContain(added.color)

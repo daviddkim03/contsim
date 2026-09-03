@@ -9,13 +9,20 @@ import {
   type Scenario,
 } from '../core'
 import { exampleScenario } from '../scenarios'
+import { catalogTexts, findCatalogItem } from './catalogSearch'
 import { nextColor } from './palette'
 import { CONTAINER_TYPES, presetFor, presetTexts, type ContainerType } from './presets'
 import { UNITS, parseCount, parseLength, scaleFor, toInt, type Unit } from './units'
 
+export type BoxKind = 'catalog' | 'custom'
+
 /** What the user typed. Strings, so partial or invalid input survives a render and can be flagged. */
 export interface BoxTypeDraft {
   id: string
+  /** Catalog rows take their name and size from the catalog code; custom rows from the fields. */
+  kind: BoxKind
+  /** Empty until a catalog item is picked. */
+  catalogCode: string
   name: string
   l: string
   w: string
@@ -23,6 +30,8 @@ export interface BoxTypeDraft {
   qty: string
   color: string
 }
+
+export const BOX_KINDS: readonly BoxKind[] = ['catalog', 'custom']
 
 export interface Draft {
   /** A standard container, or 'custom' to use the typed dimensions below. */
@@ -119,6 +128,8 @@ export function draftFromScenario(scenario: Scenario, unit: Unit): Draft {
     unit,
     types: scenario.types.map((t) => ({
       id: t.id,
+      kind: 'custom' as const,
+      catalogCode: '',
       name: t.name,
       l: s(t.dims.l),
       w: s(t.dims.w),
@@ -132,16 +143,22 @@ export function draftFromScenario(scenario: Scenario, unit: Unit): Draft {
 export const exampleDraft = (): Draft => draftFromScenario(exampleScenario(), 'in')
 
 const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+const NO_DIMS = { l: NaN, w: NaN, h: NaN }
 
 /** Parses, scales, validates and packs the draft. Pure and synchronous; a few milliseconds. */
 export function derive(draft: Draft): Derived {
   const issues: Record<string, string> = {}
   const containerText = containerTexts(draft)
+  // A catalog row's size comes from the catalog in the draft's unit; a custom row's from its fields.
+  const rows = draft.types.map((t) => {
+    const item = t.kind === 'catalog' ? findCatalogItem(t.catalogCode) : null
+    return { item, texts: item ? catalogTexts(item, draft.unit) : { l: t.l, w: t.w, h: t.h } }
+  })
   const texts = [
     containerText.l,
     containerText.w,
     containerText.h,
-    ...draft.types.flatMap((t) => [t.l, t.w, t.h]),
+    ...rows.flatMap((r) => [r.texts.l, r.texts.w, r.texts.h]),
   ]
   const scale = scaleFor(texts)
 
@@ -167,19 +184,34 @@ export function derive(draft: Draft): Derived {
     w: length('container.w', containerText.w),
     h: length('container.h', containerText.h),
   }
-  const types: BoxType[] = draft.types.map((t, i) => ({
-    id: t.id,
-    name: t.name.trim() || `Box ${i + 1}`,
-    color: t.color,
-    dims: {
-      l: length(`types[${i}].dims.l`, t.l),
-      w: length(`types[${i}].dims.w`, t.w),
-      h: length(`types[${i}].dims.h`, t.h),
-    },
-    qty: count(`types[${i}].qty`, t.qty),
-  }))
+  const unresolved = new Set<number>()
+  const types: BoxType[] = draft.types.map((t, i) => {
+    const { item, texts } = rows[i]!
+    const qty = count(`types[${i}].qty`, t.qty)
+    if (t.kind === 'catalog' && !item) {
+      issues[`types[${i}].catalog`] = t.catalogCode
+        ? 'Not in the catalog'
+        : 'Pick a cabinet from the catalog'
+      unresolved.add(i)
+      return { id: t.id, name: t.name.trim() || `Box ${i + 1}`, color: t.color, dims: NO_DIMS, qty }
+    }
+    return {
+      id: t.id,
+      name: item ? item.code : t.name.trim() || `Box ${i + 1}`,
+      color: t.color,
+      dims: {
+        l: length(`types[${i}].dims.l`, texts.l),
+        w: length(`types[${i}].dims.w`, texts.w),
+        h: length(`types[${i}].dims.h`, texts.h),
+      },
+      qty,
+    }
+  })
 
   for (const issue of validateScenario(container, types)) {
+    // A row still waiting for a catalog pick has no dimensions to complain about.
+    const row = /^types\[(\d+)\]\.dims\./.exec(issue.path)
+    if (row && unresolved.has(Number(row[1]))) continue
     if (!(issue.path in issues)) issues[issue.path] = capitalize(issue.message)
   }
   if (Object.keys(issues).length > 0) {
@@ -228,10 +260,13 @@ export const edits = {
   setKeepUpright(draft: Draft, keepUpright: boolean): Draft {
     return { ...draft, keepUpright }
   },
+  /** A new row starts as a catalog search with nothing picked yet. */
   addType(draft: Draft): Draft {
     const type: BoxTypeDraft = {
       id: newTypeId(draft.types.map((t) => t.id)),
-      name: newTypeName(draft.types),
+      kind: 'catalog',
+      catalogCode: '',
+      name: '',
       l: '',
       w: '',
       h: '',
@@ -239,6 +274,26 @@ export const edits = {
       color: nextColor(draft.types.map((t) => t.color)),
     }
     return { ...draft, types: [...draft.types, type] }
+  },
+  /** Picks a catalog item; its size is also copied into the fields so a later switch to custom starts from it. */
+  setCatalogItem(draft: Draft, id: string, code: string): Draft {
+    const item = findCatalogItem(code)
+    const texts = item ? catalogTexts(item, draft.unit) : null
+    return {
+      ...draft,
+      types: draft.types.map((t) =>
+        t.id === id ? { ...t, kind: 'catalog', catalogCode: code, name: code, ...texts } : t,
+      ),
+    }
+  },
+  /** Turns a row into a custom box named `name` (or a generated name), keeping whatever size it had. */
+  setCustom(draft: Draft, id: string, name: string): Draft {
+    const others = draft.types.filter((t) => t.id !== id)
+    const finalName = name.trim() || newTypeName(others)
+    return {
+      ...draft,
+      types: draft.types.map((t) => (t.id === id ? { ...t, kind: 'custom', name: finalName } : t)),
+    }
   },
   removeType(draft: Draft, id: string): Draft {
     return { ...draft, types: draft.types.filter((t) => t.id !== id) }
@@ -296,7 +351,22 @@ export function parseDraft(json: string): Draft | null {
       const r = t as Record<string, unknown>
       if (!r || !isString(r.id) || !isString(r.name) || !isString(r.color)) return null
       if (!isString(r.l) || !isString(r.w) || !isString(r.h) || !isString(r.qty)) return null
-      types.push({ id: r.id, name: r.name, l: r.l, w: r.w, h: r.h, qty: r.qty, color: r.color })
+      // Rows saved before the catalog existed are custom boxes.
+      const kind = r.kind === undefined ? 'custom' : r.kind
+      if (!BOX_KINDS.includes(kind as BoxKind)) return null
+      const catalogCode = r.catalogCode === undefined ? '' : r.catalogCode
+      if (!isString(catalogCode)) return null
+      types.push({
+        id: r.id,
+        kind: kind as BoxKind,
+        catalogCode,
+        name: r.name,
+        l: r.l,
+        w: r.w,
+        h: r.h,
+        qty: r.qty,
+        color: r.color,
+      })
     }
     return {
       containerType: containerType as ContainerType,

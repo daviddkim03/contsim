@@ -35,10 +35,11 @@ export interface StatusSummary {
 export function describeIssue(path: string, message: string, draft: Draft): string {
   const container = /^container\.(l|w|h)$/.exec(path)
   if (container) return `Container ${container[1]!.toUpperCase()}: ${message}`
-  const type = /^types\[(\d+)\]\.(?:dims\.(l|w|h)|(qty)|(id))$/.exec(path)
+  const type = /^types\[(\d+)\]\.(?:dims\.(l|w|h)|(qty)|(id)|(catalog))$/.exec(path)
   if (type) {
     const t = draft.types[Number(type[1])]
     const name = t?.name.trim() || `Box ${Number(type[1]) + 1}`
+    if (type[5]) return `${name}: ${message}`
     const field = type[2] ? type[2].toUpperCase() : type[3] ? 'quantity' : 'id'
     return `${name} ${field}: ${message}`
   }

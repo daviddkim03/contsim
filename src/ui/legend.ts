@@ -85,7 +85,11 @@ export function mountLegend(root: HTMLElement, store: Store): Panel {
       swatch.style.background = type.color
       const dims = coreType
         ? `${formatNumber(coreType.dims.l, scale)} × ${formatNumber(coreType.dims.w, scale)} × ${formatNumber(coreType.dims.h, scale)} ${draft.unit}`
-        : `${type.l || '?'} × ${type.w || '?'} × ${type.h || '?'} ${draft.unit}`
+        : type.kind === 'catalog'
+          ? type.catalogCode
+            ? 'Not in the catalog'
+            : 'No cabinet picked yet'
+          : `${type.l || '?'} × ${type.w || '?'} × ${type.h || '?'} ${draft.unit}`
       const count =
         placed !== null && requested !== null ? `${placed} / ${requested}` : type.qty || '?'
       if (placed !== null && requested !== null && placed < requested) row.classList.add('short')
