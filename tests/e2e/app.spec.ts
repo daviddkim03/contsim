@@ -79,6 +79,30 @@ test('impossible scenarios explain why, in display units', async ({ page }) => {
   )
 })
 
+test('a standard container fills the dimensions and locks them', async ({ page }) => {
+  const type = page.locator('[data-field="containerType"]')
+  const length = page.locator('[data-field="container.l"]')
+  await expect(type).toHaveValue('custom')
+  await expect(length).toBeEnabled()
+
+  await type.selectOption('40ft-hc')
+  await expect(length).toHaveValue('473.7')
+  await expect(length).toBeDisabled()
+  await expect(page.locator('[data-field="container.h"]')).toHaveValue('106.2')
+  await expect(badge(page)).toHaveText('Fits')
+  await expect(page.locator('[data-role="container-hint"]')).toContainText('Typical interior size')
+
+  await page.locator('[data-field="unit"]').selectOption('mm')
+  await expect(length).toHaveValue('12032')
+
+  await type.selectOption('custom')
+  await expect(length).toBeEnabled()
+  await expect(length).toHaveValue('12032')
+  await page.reload()
+  await expect(type).toHaveValue('custom')
+  await expect(length).toHaveValue('12032')
+})
+
 test('adding and removing box types', async ({ page }) => {
   await page.locator('[data-action="add"]').click()
   await expect(page.locator('.box-row')).toHaveCount(6)

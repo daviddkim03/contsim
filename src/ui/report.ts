@@ -11,6 +11,7 @@
  */
 
 import { OBJECTIVE_LABELS, summarizeStatus } from './describe'
+import { containerTypeName } from './presets'
 import { shownResult, type AppState } from './state'
 import { fromInt, volumeOf, type Unit } from './units'
 import { percent, type Cell, type Sheet, type Workbook } from './xlsx'
@@ -73,6 +74,7 @@ export function buildReport(state: AppState, now: Date = new Date()): Workbook |
         : status.text,
     ],
     ['Unit', unit],
+    ['Container type', containerTypeName(draft.containerType)],
     [lengthHeader('Container length'), length(scenario.container.l)],
     [lengthHeader('Container width'), length(scenario.container.w)],
     [lengthHeader('Container height'), length(scenario.container.h)],

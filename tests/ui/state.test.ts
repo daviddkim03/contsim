@@ -67,6 +67,7 @@ describe('derive', () => {
 
   it('never throws on garbage input', () => {
     const draft: Draft = {
+      containerType: 'custom',
       container: { l: '', w: '-', h: '9'.repeat(30) },
       types: [{ id: 'x', name: '', l: '.', w: '1', h: '1', qty: '-3', color: '#000' }],
       keepUpright: true,
@@ -74,6 +75,37 @@ describe('derive', () => {
     }
     expect(() => derive(draft)).not.toThrow()
     expect(derive(draft).result).toBeNull()
+  })
+})
+
+describe('container presets', () => {
+  it('derives the container from the preset in the chosen unit', () => {
+    const draft = edits.setContainerType(mixed(), '40ft-hc')
+    expect(derive(draft).scenario?.container).toEqual({ l: 4737, w: 926, h: 1062 })
+    expect(derive(draft).scale).toBe(10)
+    const metric = edits.setUnit(draft, 'mm')
+    expect(derive(metric).scenario?.container).toEqual({ l: 12032, w: 2352, h: 2698 })
+    expect(derive(metric).scale).toBe(1)
+  })
+
+  it('keeps the custom dimensions while a preset is selected and prefills custom from the preset', () => {
+    const custom = edits.setContainer(mixed(), 'l', '100')
+    const preset = edits.setContainerType(custom, '20ft')
+    expect(preset.container.l).toBe('100')
+    expect(derive(preset).scenario?.container.l).toBe(2322)
+    expect(edits.setContainerType(preset, '20ft')).toBe(preset)
+    const back = edits.setContainerType(preset, 'custom')
+    expect(back.container).toEqual({ l: '232.2', w: '92.6', h: '94.2' })
+  })
+
+  it('parses drafts saved before presets existed as custom and rejects unknown types', () => {
+    const { containerType: _drop, ...legacy } = mixed()
+    void _drop
+    expect(parseDraft(JSON.stringify(legacy))?.containerType).toBe('custom')
+    expect(parseDraft(JSON.stringify({ ...mixed(), containerType: '60ft' }))).toBeNull()
+    expect(parseDraft(JSON.stringify({ ...mixed(), containerType: '40ft' }))?.containerType).toBe(
+      '40ft',
+    )
   })
 })
 

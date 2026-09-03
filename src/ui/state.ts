@@ -10,6 +10,7 @@ import {
 } from '../core'
 import { exampleScenario } from '../scenarios'
 import { nextColor } from './palette'
+import { CONTAINER_TYPES, presetFor, presetTexts, type ContainerType } from './presets'
 import { UNITS, parseCount, parseLength, scaleFor, toInt, type Unit } from './units'
 
 /** What the user typed. Strings, so partial or invalid input survives a render and can be flagged. */
@@ -24,10 +25,19 @@ export interface BoxTypeDraft {
 }
 
 export interface Draft {
+  /** A standard container, or 'custom' to use the typed dimensions below. */
+  containerType: ContainerType
+  /** Custom interior dimensions. Kept while a preset is selected, so switching back restores them. */
   container: { l: string; w: string; h: string }
   types: BoxTypeDraft[]
   keepUpright: boolean
   unit: Unit
+}
+
+/** The container dimensions the draft stands for: the preset's, or the typed ones. */
+export function containerTexts(draft: Draft): { l: string; w: string; h: string } {
+  const preset = presetFor(draft.containerType)
+  return preset ? presetTexts(preset, draft.unit) : draft.container
 }
 
 /** Everything computed from the draft. */
@@ -99,6 +109,7 @@ export function shownResult(state: AppState): PackResult | null {
 export function draftFromScenario(scenario: Scenario, unit: Unit): Draft {
   const s = (n: number) => String(n)
   return {
+    containerType: 'custom',
     container: {
       l: s(scenario.container.l),
       w: s(scenario.container.w),
@@ -125,10 +136,11 @@ const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 /** Parses, scales, validates and packs the draft. Pure and synchronous; a few milliseconds. */
 export function derive(draft: Draft): Derived {
   const issues: Record<string, string> = {}
+  const containerText = containerTexts(draft)
   const texts = [
-    draft.container.l,
-    draft.container.w,
-    draft.container.h,
+    containerText.l,
+    containerText.w,
+    containerText.h,
     ...draft.types.flatMap((t) => [t.l, t.w, t.h]),
   ]
   const scale = scaleFor(texts)
@@ -151,9 +163,9 @@ export function derive(draft: Draft): Derived {
   }
 
   const container: Container = {
-    l: length('container.l', draft.container.l),
-    w: length('container.w', draft.container.w),
-    h: length('container.h', draft.container.h),
+    l: length('container.l', containerText.l),
+    w: length('container.w', containerText.w),
+    h: length('container.h', containerText.h),
   }
   const types: BoxType[] = draft.types.map((t, i) => ({
     id: t.id,
@@ -203,6 +215,12 @@ function newTypeName(types: readonly BoxTypeDraft[]): string {
 export const edits = {
   setContainer(draft: Draft, key: ContainerKey, value: string): Draft {
     return { ...draft, container: { ...draft.container, [key]: value } }
+  },
+  /** Switching from a preset to custom starts from the preset's dimensions. */
+  setContainerType(draft: Draft, containerType: ContainerType): Draft {
+    if (containerType === draft.containerType) return draft
+    const container = containerType === 'custom' ? containerTexts(draft) : draft.container
+    return { ...draft, containerType, container }
   },
   setUnit(draft: Draft, unit: Unit): Draft {
     return { ...draft, unit }
@@ -270,6 +288,9 @@ export function parseDraft(json: string): Draft | null {
     if (!c || !isString(c.l) || !isString(c.w) || !isString(c.h)) return null
     if (!Array.isArray(d.types)) return null
     if (!UNITS.includes(d.unit as Unit)) return null
+    // Drafts saved before container presets existed have no type: they are custom.
+    const containerType = d.containerType === undefined ? 'custom' : d.containerType
+    if (!CONTAINER_TYPES.includes(containerType as ContainerType)) return null
     const types: BoxTypeDraft[] = []
     for (const t of d.types as unknown[]) {
       const r = t as Record<string, unknown>
@@ -278,6 +299,7 @@ export function parseDraft(json: string): Draft | null {
       types.push({ id: r.id, name: r.name, l: r.l, w: r.w, h: r.h, qty: r.qty, color: r.color })
     }
     return {
+      containerType: containerType as ContainerType,
       container: { l: c.l, w: c.w, h: c.h },
       types,
       keepUpright: d.keepUpright === true,

@@ -229,6 +229,16 @@ ul {
   font-size: 12px;
 }
 
+.container-type {
+  margin-bottom: 8px;
+}
+
+.sidebar input:disabled {
+  color: var(--sidebar-muted);
+  background: transparent;
+  border-style: dashed;
+}
+
 .dims {
   display: grid;
   grid-template-columns: 1fr auto 1fr auto 1fr;

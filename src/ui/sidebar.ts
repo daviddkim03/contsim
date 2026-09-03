@@ -3,8 +3,10 @@ import { OBJECTIVE_LABELS } from './describe'
 import { download, h, query, setInvalid, setValue, setText } from './dom'
 import { wireHover } from './legend'
 import type { OptimizeController } from './optimizeClient'
+import { CONTAINER_PRESETS, presetFor, type ContainerType } from './presets'
 import { buildReport, EXCEL_FILENAME } from './report'
 import {
+  containerTexts,
   edits,
   exampleDraft,
   parseDraft,
@@ -45,6 +47,10 @@ export function mountSidebar(
           ${UNITS.map((u) => `<option value="${u}">${u}</option>`).join('')}
         </select>
       </div>
+      <select class="container-type" data-field="containerType" aria-label="Container type">
+        ${CONTAINER_PRESETS.map((p) => `<option value="${p.id}">${p.name}</option>`).join('')}
+        <option value="custom">Custom size</option>
+      </select>
       <div class="dims">
         <label><span>L</span><input data-field="container.l" inputmode="decimal" autocomplete="off" aria-label="Container length"></label>
         <span class="times">×</span>
@@ -52,7 +58,7 @@ export function mountSidebar(
         <span class="times">×</span>
         <label><span>H</span><input data-field="container.h" inputmode="decimal" autocomplete="off" aria-label="Container height"></label>
       </div>
-      <p class="hint">Interior dimensions</p>
+      <p class="hint" data-role="container-hint">Interior dimensions</p>
     </section>
 
     <section class="panel boxes">
@@ -95,6 +101,8 @@ export function mountSidebar(
     CONTAINER_KEYS.map((k) => [k, query<HTMLInputElement>(root, `[data-field="container.${k}"]`)]),
   ) as Record<ContainerKey, HTMLInputElement>
   const unitSelect = query<HTMLSelectElement>(root, '[data-field="unit"]')
+  const containerTypeSelect = query<HTMLSelectElement>(root, '[data-field="containerType"]')
+  const containerHint = query<HTMLElement>(root, '[data-role="container-hint"]')
   const uprightCheckbox = query<HTMLInputElement>(root, '[data-field="keepUpright"]')
   const list = query<HTMLUListElement>(root, '.box-list')
   const empty = query<HTMLElement>(root, '.empty')
@@ -133,6 +141,9 @@ export function mountSidebar(
   root.addEventListener('change', (event) => {
     const target = event.target
     if (target === unitSelect) store.edit((d) => edits.setUnit(d, unitSelect.value as Unit))
+    if (target === containerTypeSelect) {
+      store.edit((d) => edits.setContainerType(d, containerTypeSelect.value as ContainerType))
+    }
     if (target === uprightCheckbox) {
       store.edit((d) => edits.setKeepUpright(d, uprightCheckbox.checked))
     }
@@ -255,10 +266,20 @@ export function mountSidebar(
 
   function render(state: AppState): void {
     const { draft, derived, optimize } = state
+    const preset = presetFor(draft.containerType)
+    const container = containerTexts(draft)
+    setValue(containerTypeSelect, draft.containerType)
     for (const key of CONTAINER_KEYS) {
-      setValue(containerInputs[key], draft.container[key])
+      setValue(containerInputs[key], container[key])
+      containerInputs[key].disabled = preset !== null
       setInvalid(containerInputs[key], derived.issues[`container.${key}`])
     }
+    setText(
+      containerHint,
+      preset
+        ? 'Typical interior size. Choose Custom size to enter your own.'
+        : 'Interior dimensions',
+    )
     setValue(unitSelect, draft.unit)
     uprightCheckbox.checked = draft.keepUpright
 
