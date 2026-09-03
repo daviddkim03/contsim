@@ -20,7 +20,7 @@ All six phases were built and verified on 2026-08-28: 116 unit tests, 14 Playwri
 
 Added on 2026-09-02: Export Excel (a dependency-free .xlsx writer, section 5.4) and a GitHub Actions workflow that runs the checks and deploys to GitHub Pages.
 
-Added on 2026-09-03: container presets and a cabinet catalog with a searchable picker (section 5.5), and packing into as many containers as the order needs with automatic background optimization (sections 4.4 and 5.6). The Optimize button, its objectives and the Apply / Discard popover are gone; the optimizer's job is now to fill each container as densely as possible.
+Added on 2026-09-03: container presets and a cabinet catalog with a searchable picker (section 5.5), and packing into as many containers as the order needs with automatic background optimization (sections 4.4 and 5.6). The Optimize button, its objectives and the Apply / Discard popover are gone; the optimizer's job is now to fill each container as densely as possible. Later the same day: Excel import of an order, with a template and a guide, replacing JSON import and export (section 5.7); the Excel export imports back.
 
 ## 1. Goals and non-goals
 
@@ -320,7 +320,7 @@ The takeoff-tool screenshot is the layout and style reference: dark left sidebar
 - 3D view: container as a wireframe over a light floor, boxes as solid colored cuboids with dark edges, one stable color per type. Hovering a legend row or a sidebar row highlights that type (everything else fades). The layer slider hides every box whose bottom is above the chosen height so the user can look inside. The camera follows the container until the user first orbits; after that it only moves on Reset view or when the container dims change. A 3D / Table toggle swaps the center panel for the placement list. Rendering is on demand, not a loop. Without WebGL the app falls back to the table.
 - Unplaced boxes: shown in the legend as "7/10" and listed under the status.
 - Optimize: automatic, see 5.6. (Until 2026-09-03 this was a button with three objectives and an Apply / Discard popover proposing quantity reductions; with overflow going to another container, reductions no longer make sense.)
-- Persistence: the current scenario is saved to localStorage on every change. Export JSON downloads `contsim-scenario.json`; Import JSON reads one back (a file that is not a scenario shows a message and changes nothing). "Load example" restores the sample scenario after a confirmation. Export Excel downloads `contsim-packing.xlsx` (section 5.4).
+- Persistence: the current scenario is saved to localStorage on every change. Export Excel downloads `contsim-packing.xlsx` (section 5.4) and Import reads it back, or reads an order sheet (section 5.7). "Load example" restores the sample scenario after a confirmation. (JSON import and export existed until 2026-09-03.)
 - Validation: non-numeric, zero, negative, or absurdly large dims mark the field invalid; the packer does not run; status shows "Fix inputs". Never crash on bad input.
 
 ### 5.3 Style
@@ -348,6 +348,12 @@ Box rows pick from the cabinet catalog (`data/catalog.xlsx` -> `npm run catalog`
 The status badge reads Fits (one container), "N containers" (blue), Impossible (a type that fits in no container; the rest is still packed and the badge's details say so), Too many (container cap), or Fix inputs. The side panel lists the containers with box counts and fill bars; clicking one, or the "Container 1 of N" switcher in the toolbar, selects what the 3D view shows. The legend shows placed / requested per type plus how many are in the selected container. The table lists every placement with its container number, and the Excel export gains a Containers sheet and a Container column.
 
 Whenever a fresh first-fit result needs more than one container, `src/ui/optimizeClient.ts` starts `packMany` with a 400-run budget in a Web Worker and mirrors progress into the status panel ("Optimizing container fill... 120 / 400 runs"). Any edit terminates the worker; the next settled recompute starts a fresh one. Measured on the example order (150 cabinets, 20 ft): first fit needs 2 containers at 88 % and 65 % fill, the optimizer confirms it in about 50 ms.
+
+### 5.7 Importing an order
+
+Import (in the Boxes panel) accepts an .xlsx or .csv file. `src/ui/spreadsheet.ts` reads workbooks without a library: the ZIP is inflated with the browser's DecompressionStream, worksheets are parsed with regular expressions (shared strings, inline strings, formula results, booleans, errors), and CSV is split on the delimiter used in the first line with quoted fields. `src/ui/orderImport.ts` finds the header row (within the first 20 rows) by its column words, case, punctuation and units aside: Code (Type, Item, SKU, Name, Box), Qty (Quantity, Count, Pcs, Requested), Width / Depth / Height (W / D / H; Length and Width side by side mean first and second size, the app's own naming), and Color. Catalog codes are matched ignoring case and spaces and take their size from the catalog; other codes need all three sizes and become custom boxes; duplicate codes add up; every skipped row gets a one-line reason shown under the buttons. Sizes convert from the unit named in the header into the app's unit.
+
+A workbook with Boxes and Summary sheets is the app's own export: the Boxes sheet is read as an order (with colors) and the Summary sheet restores the container type or custom size, the unit and the upright setting, so Export Excel doubles as save-and-load. "Order template" downloads a workbook with the columns, three example rows and a Guide sheet listing the rules (`ORDER_FORMAT_GUIDE`, also in README.md). Importing over a non-empty list asks for confirmation.
 
 ## 6. Tech stack
 
@@ -383,7 +389,7 @@ contsim/
     catalog.ts            generated cabinet catalog (npm run catalog); do not edit
     scenarios.ts          synthetic scenarios (mixedScenario, exampleScenario) used by the core tests
     ui/
-      state.ts            scenario state, reducers, validation, localStorage, JSON import/export
+      state.ts            scenario state, reducers, validation, localStorage persistence
       units.ts            unit labels, integer scaling at the boundary, formatting
       dom.ts              tiny DOM helpers (h, setValue, setInvalid, download)
       describe.ts         status wording shared by the status panel and the report
@@ -391,6 +397,8 @@ contsim/
       catalogSearch.ts    catalog lookup, unit conversion and search ranking (5.5)
       combobox.ts         searchable dropdown used by the box rows (5.5)
       example.ts          the order the app opens with
+      spreadsheet.ts      reads .xlsx (ZIP + SpreadsheetML) and .csv into rows (5.7)
+      orderImport.ts      rows -> box rows, the export round trip, the order template (5.7)
       palette.ts          box type colors
       sidebar.ts          container preset and size, box rows with the catalog picker, export
       legend.ts           status panel, container list (selector) and legend

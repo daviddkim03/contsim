@@ -296,18 +296,71 @@ test('the optimizer runs by itself after an edit and the result stays consistent
   )
 })
 
-test('export downloads the scenario and import restores it', async ({ page }) => {
+test('the Excel export imports back: order, container, unit and upright setting', async ({
+  page,
+}) => {
+  await page.locator('[data-field="containerType"]').selectOption('40ft-hc')
+  await page.locator('[data-field="keepUpright"]').check()
+  await expect(badge(page)).toHaveText('Fits')
   const downloadPromise = page.waitForEvent('download')
-  await page.locator('[data-action="export-json"]').click()
-  const download = await downloadPromise
-  expect(download.suggestedFilename()).toBe('contsim-scenario.json')
-  const path = await download.path()
+  await page.locator('[data-action="export-excel"]').click()
+  const path = (await (await downloadPromise).path())!
 
+  await page.locator('[data-field="containerType"]').selectOption('20ft')
+  await page.locator('[data-field="keepUpright"]').uncheck()
   await qty(page, 0).fill('3')
-  await expect(qty(page, 0)).toHaveValue('3')
+  await row(page, 9).locator('[data-action="remove"]').click()
+  await expect(page.locator('.box-row')).toHaveCount(9)
+
+  page.once('dialog', (dialog) => void dialog.accept())
   await page.locator('[data-field="import-file"]').setInputFiles(path)
+  await expect(page.locator('[data-role="footer-hint"]')).toContainText(
+    'Imported 10 rows, 150 boxes',
+  )
+  await expect(page.locator('.box-row')).toHaveCount(10)
   await expect(qty(page, 0)).toHaveValue('20')
-  await expect(badge(page)).toHaveText('2 containers')
+  await expect(page.locator('[data-field="containerType"]')).toHaveValue('40ft-hc')
+  await expect(page.locator('[data-field="keepUpright"]')).toBeChecked()
+  await expect(badge(page)).toHaveText('Fits')
+  // The message stays until the next change.
+  await expect(page.locator('[data-role="footer-hint"]')).toContainText('Imported 10 rows')
+  await qty(page, 0).fill('21')
+  await expect(page.locator('[data-role="footer-hint"]')).toHaveText('Results update as you type')
+})
+
+test('Import reads an order from the template or a CSV file', async ({ page }) => {
+  const downloadPromise = page.waitForEvent('download')
+  await page.locator('[data-action="template"]').click()
+  const download = await downloadPromise
+  expect(download.suggestedFilename()).toBe('contsim-order-template.xlsx')
+  page.once('dialog', (dialog) => void dialog.accept())
+  await page.locator('[data-field="import-file"]').setInputFiles((await download.path())!)
+  await expect(page.locator('[data-role="footer-hint"]')).toContainText('Imported 3 rows, 7 boxes')
+  await expect(page.locator('.box-row')).toHaveCount(3)
+  await expect(row(page, 0).locator('[data-field="search"]')).toHaveValue('3036')
+  await expect(row(page, 2)).toHaveAttribute('data-kind', 'custom')
+  await expect(row(page, 2).locator('[data-field="search"]')).toHaveValue('Crate')
+  await expect(row(page, 2).locator('[data-field="l"]')).toHaveValue('40')
+  await expect(badge(page)).toHaveText('Fits')
+
+  // Other column names, a size in millimetres, a duplicate and an unknown row.
+  const csv =
+    'Item;Quantity;Width (mm);Depth (mm);Height (mm)\n3036;4;;;\n3036;1;;;\nCrate;2;1016;762;508\nNope;1;;;\n'
+  page.once('dialog', (dialog) => void dialog.accept())
+  await page.locator('[data-field="import-file"]').setInputFiles({
+    name: 'order.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from(csv),
+  })
+  const hint = page.locator('[data-role="footer-hint"]')
+  await expect(hint).toContainText('Imported 2 rows, 7 boxes, from order.csv')
+  await expect(hint).toContainText('3036 appears more than once')
+  await expect(hint).toContainText('"Nope" is not in the catalog')
+  await expect(page.locator('.box-row')).toHaveCount(2)
+  await expect(qty(page, 0)).toHaveValue('5')
+  await expect(row(page, 1).locator('[data-field="l"]')).toHaveValue('40')
+  await expect(row(page, 1).locator('[data-field="w"]')).toHaveValue('30')
+  await expect(badge(page)).toHaveText('Fits')
 })
 
 test('Export Excel downloads a workbook with summary, containers, boxes and placements', async ({
@@ -356,16 +409,15 @@ test('Export Excel waits for the inputs to be valid', async ({ page }) => {
   await expect(button).toBeEnabled()
 })
 
-test('importing a file that is not a scenario changes nothing and says so', async ({ page }) => {
-  await page.locator('[data-field="import-file"]').evaluate((input: HTMLInputElement) => {
-    const transfer = new DataTransfer()
-    transfer.items.add(new File(['{"nope": 1}'], 'notes.json', { type: 'application/json' }))
-    input.files = transfer.files
-    input.dispatchEvent(new Event('change', { bubbles: true }))
+test('importing a file without an order in it changes nothing and says so', async ({ page }) => {
+  await page.locator('[data-field="import-file"]').setInputFiles({
+    name: 'notes.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from('just some notes\nnothing here'),
   })
-  await expect(page.locator('[data-role="footer-hint"]')).toHaveText(
-    'notes.json is not a contsim scenario.',
-  )
+  await expect(page.locator('[data-role="footer-hint"]')).toContainText('notes.csv: No header row')
+  await expect(page.locator('[data-role="footer-hint"]')).toHaveClass(/error/)
+  await expect(page.locator('.box-row')).toHaveCount(10)
   await expect(qty(page, 0)).toHaveValue('20')
 })
 

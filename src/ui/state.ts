@@ -32,6 +32,18 @@ export interface BoxTypeDraft {
 
 export const BOX_KINDS: readonly BoxKind[] = ['catalog', 'custom']
 
+/** What an imported spreadsheet contributes: box rows, and container settings when the file has them. */
+export interface ScenarioImport {
+  types: BoxTypeDraft[]
+  container: {
+    containerType: ContainerType
+    /** Custom interior size in `unit`; null when the file names a preset. */
+    container: { l: string; w: string; h: string } | null
+    unit: Unit
+    keepUpright: boolean
+  } | null
+}
+
 export interface Draft {
   /** A standard container, or 'custom' to use the typed dimensions below. */
   containerType: ContainerType
@@ -331,6 +343,22 @@ export const edits = {
         const current = parseCount(t.qty) ?? 0
         return { ...t, qty: String(Math.max(0, current + delta)) }
       }),
+    }
+  },
+  /** Replaces the box list with an import, and the container settings when the file carried them. */
+  applyImport(draft: Draft, imported: ScenarioImport): Draft {
+    const c = imported.container
+    return {
+      ...draft,
+      types: imported.types,
+      ...(c
+        ? {
+            containerType: c.containerType,
+            container: c.container ?? draft.container,
+            unit: c.unit,
+            keepUpright: c.keepUpright,
+          }
+        : {}),
     }
   },
   setQuantities(draft: Draft, qty: Record<string, number>): Draft {

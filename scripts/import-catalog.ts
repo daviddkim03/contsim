@@ -11,67 +11,12 @@
 
 import { execSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
-import { text, unzip } from '../tests/helpers/unzip.ts'
+import { readFirstSheet } from '../src/ui/spreadsheet.ts'
 
 const SOURCE = 'data/catalog.xlsx'
 const TARGET = 'src/catalog.ts'
 
-type Value = string | number | boolean
-
-const unescapeXml = (s: string) =>
-  s
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, '&')
-
-function sharedStrings(xml: string | undefined): string[] {
-  if (!xml) return []
-  const strings: string[] = []
-  for (const si of xml.matchAll(/<si>(.*?)<\/si>/gs)) {
-    // A rich-text string is several <t> runs; plain ones have one.
-    const runs = [...si[1]!.matchAll(/<t[^>]*>(.*?)<\/t>/gs)].map((m) => unescapeXml(m[1]!))
-    strings.push(runs.join(''))
-  }
-  return strings
-}
-
-function columnIndex(label: string): number {
-  let n = 0
-  for (const ch of label) n = n * 26 + (ch.charCodeAt(0) - 64)
-  return n - 1
-}
-
-/** Rows of cell values; cells Excel left out are holes. */
-function readRows(xml: string, shared: string[]): Value[][] {
-  const rows: Value[][] = []
-  for (const row of xml.matchAll(/<row[^>]*>(.*?)<\/row>/gs)) {
-    const cells: Value[] = []
-    for (const cell of row[1]!.matchAll(/<c r="([A-Z]+)\d+"([^>]*?)(?:\/>|>(.*?)<\/c>)/gs)) {
-      const [, column, attrs, inner = ''] = cell
-      const type = /\bt="([^"]+)"/.exec(attrs!)?.[1]
-      const v = /<v>(.*?)<\/v>/s.exec(inner)?.[1]
-      const index = columnIndex(column!)
-      if (type === 's') cells[index] = shared[Number(v)] ?? ''
-      else if (type === 'inlineStr') {
-        cells[index] = unescapeXml(/<t[^>]*>(.*?)<\/t>/s.exec(inner)?.[1] ?? '')
-      } else if (type === 'str') cells[index] = unescapeXml(v ?? '')
-      else if (type === 'b') cells[index] = v === '1'
-      else if (v !== undefined) cells[index] = Number(v)
-    }
-    rows.push(cells)
-  }
-  return rows
-}
-
-const parts = unzip(new Uint8Array(readFileSync(SOURCE)))
-const sheet = parts.get('xl/worksheets/sheet1.xml')
-if (!sheet) throw new Error(`${SOURCE} has no first worksheet`)
-const strings = sharedStrings(
-  parts.get('xl/sharedStrings.xml') && text(parts.get('xl/sharedStrings.xml')!),
-)
-const [header, ...rows] = readRows(text(sheet), strings)
+const [header, ...rows] = await readFirstSheet(new Uint8Array(readFileSync(SOURCE)))
 
 const expected = ['TYPE', 'W', 'D', 'H']
 if (

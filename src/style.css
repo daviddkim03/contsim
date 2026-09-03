@@ -920,8 +920,13 @@ button.primary:disabled {
 
 .file-row {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: 1fr 1fr;
   gap: 4px;
+}
+
+.title-actions {
+  display: flex;
+  gap: 2px;
 }
 
 .file-row button {

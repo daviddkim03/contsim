@@ -217,6 +217,33 @@ describe('edits', () => {
     expect(draft.types.map((t) => t.qty)).toEqual(['3', '3', '20', '10', '0'])
   })
 
+  it('applyImport replaces the rows and applies container settings when the file has them', () => {
+    const draft = mixed()
+    const types = [{ ...draft.types[0]!, id: 'new', qty: '7' }]
+    const plain = edits.applyImport(draft, { types, container: null })
+    expect(plain.types).toBe(types)
+    expect(plain).toMatchObject({ unit: 'in', containerType: 'custom', keepUpright: false })
+
+    const preset = edits.applyImport(draft, {
+      types,
+      container: { containerType: '40ft', container: null, unit: 'mm', keepUpright: true },
+    })
+    expect(preset).toMatchObject({ containerType: '40ft', unit: 'mm', keepUpright: true })
+    expect(preset.container).toEqual(draft.container)
+
+    const custom = edits.applyImport(draft, {
+      types,
+      container: {
+        containerType: 'custom',
+        container: { l: '1', w: '2', h: '3' },
+        unit: 'cm',
+        keepUpright: false,
+      },
+    })
+    expect(custom.container).toEqual({ l: '1', w: '2', h: '3' })
+    expect(custom.unit).toBe('cm')
+  })
+
   it('does not mutate the previous draft', () => {
     const before = mixed()
     const json = JSON.stringify(before)

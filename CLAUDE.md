@@ -20,6 +20,7 @@ Container packing simulator: a static, browser-only app that packs an order of c
 - Status semantics matter. A single-container `PackResult`: `fits` is proven, `impossible` is proven, `not-found` means the heuristic failed. A `MultiPackResult`: `fits` means every box is in some container (the count is an upper bound), `impossible` means a type fits in no container in any orientation (the rest is still packed), `limit` means the container cap was hit. Never present a heuristic miss as impossibility.
 - Status and objective wording lives in `src/ui/describe.ts` and is shared by the legend, the sidebar and the Excel report; do not duplicate it.
 - Excel export: `src/ui/report.ts` turns the state into sheets, `src/ui/xlsx.ts` writes SpreadsheetML, `src/ui/zip.ts` writes the archive. All dependency-free; `tests/helpers/unzip.ts` reads the result back independently.
+- Import: `src/ui/spreadsheet.ts` reads .xlsx (all sheets, shared strings) and .csv; `src/ui/orderImport.ts` maps rows to box rows and recognizes the app's own export (Boxes + Summary sheets restore the whole scenario). There is no JSON import or export any more; `parseDraft` / `serializeDraft` only serve localStorage. The order format is documented once, in `ORDER_FORMAT_GUIDE`, and copied into README.md; keep them in step.
 - Deploy: `.github/workflows/deploy.yml` runs the checks and publishes `dist/` to GitHub Pages on pushes to main, built with `--base /<repo>/`.
 
 ## Working rules

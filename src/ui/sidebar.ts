@@ -2,17 +2,24 @@ import { findCatalogItem, formatCatalogDims, searchCatalog } from './catalogSear
 import { attachCombobox } from './combobox'
 import { download, h, query, setInvalid, setValue, setText } from './dom'
 import { wireHover } from './legend'
+import {
+  importOrder,
+  importWorkbook,
+  ORDER_TEMPLATE_FILENAME,
+  orderTemplate,
+  type ImportParse,
+} from './orderImport'
 import { CONTAINER_PRESETS, presetFor, type ContainerType } from './presets'
 import { buildReport, EXCEL_FILENAME } from './report'
+import { parseCsv, readWorkbook } from './spreadsheet'
 import {
   containerTexts,
   edits,
   exampleDraft,
-  parseDraft,
-  serializeDraft,
   type AppState,
   type BoxTypeDraft,
   type ContainerKey,
+  type Draft,
   type Store,
   type TypeField,
 } from './state'
@@ -28,7 +35,6 @@ const TYPE_FIELDS: TypeField[] = ['name', 'l', 'w', 'h', 'qty']
 const DIM_FIELDS: TypeField[] = ['l', 'w', 'h']
 /** Option id of the "Custom size" entry at the end of every catalog search. */
 const CUSTOM_OPTION = '\u0000custom'
-export const JSON_FILENAME = 'contsim-scenario.json'
 
 export function mountSidebar(root: HTMLElement, store: Store): Panel {
   root.innerHTML = `
@@ -61,7 +67,10 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
     <section class="panel boxes">
       <div class="panel-title">
         <h2>Boxes</h2>
-        <button type="button" class="ghost" data-action="add">+ Add box</button>
+        <div class="title-actions">
+          <button type="button" class="ghost" data-action="import">Import</button>
+          <button type="button" class="ghost" data-action="add">+ Add box</button>
+        </div>
       </div>
       <ul class="box-list"></ul>
       <p class="empty hint">No boxes yet. Add one to get started.</p>
@@ -79,11 +88,10 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
       <button type="button" class="primary" data-action="export-excel">Export Excel</button>
       <div class="file-row">
         <button type="button" class="ghost" data-action="example">Load example</button>
-        <button type="button" class="ghost" data-action="import">Import JSON</button>
-        <button type="button" class="ghost" data-action="export-json">Export JSON</button>
-        <input type="file" accept="application/json,.json" data-field="import-file" hidden>
+        <button type="button" class="ghost" data-action="template">Order template</button>
       </div>
       <p class="hint" data-role="footer-hint">Results update as you type</p>
+      <input type="file" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" data-field="import-file" hidden>
     </footer>
   `
 
@@ -99,7 +107,8 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
   const importInput = query<HTMLInputElement>(root, '[data-field="import-file"]')
   const excelButton = query<HTMLButtonElement>(root, '[data-action="export-excel"]')
   const footerHint = query<HTMLElement>(root, '[data-role="footer-hint"]')
-  let notice: string | null = null
+  /** A message about the last import; cleared by the next change to the draft. */
+  let notice: { text: string; error: boolean; draft: Draft } | null = null
   wireHover(list, '.box-row', store)
 
   // Text inputs: every keystroke is an edit.
@@ -165,14 +174,11 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
         }
         break
       }
-      case 'export-json':
-        download(
-          new Blob([serializeDraft(store.get().draft)], { type: 'application/json' }),
-          JSON_FILENAME,
-        )
-        break
       case 'export-excel':
         void exportExcel()
+        break
+      case 'template':
+        void downloadTemplate()
         break
       case 'import':
         importInput.value = ''
@@ -189,16 +195,51 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
     download(new Blob([await writeXlsx(workbook)], { type: XLSX_MIME }), EXCEL_FILENAME)
   }
 
+  async function downloadTemplate(): Promise<void> {
+    const workbook = orderTemplate(store.get().draft.unit)
+    download(new Blob([await writeXlsx(workbook)], { type: XLSX_MIME }), ORDER_TEMPLATE_FILENAME)
+  }
+
+  function showNotice(text: string, error: boolean): void {
+    notice = { text, error, draft: store.get().draft }
+    render(store.get())
+  }
+
+  /** An order (.xlsx or .csv) or a workbook saved with Export Excel; see orderImport.ts. */
   async function importFile(file: File | undefined): Promise<void> {
     if (!file) return
-    const draft = parseDraft(await file.text())
-    if (!draft) {
-      notice = `${file.name} is not a contsim scenario.`
-      render(store.get())
+    const { draft } = store.get()
+    let parsed: ImportParse
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      const isWorkbook = /\.xlsx$/i.test(file.name) || (bytes[0] === 0x50 && bytes[1] === 0x4b)
+      parsed = isWorkbook
+        ? importWorkbook(await readWorkbook(bytes), draft.unit, draft.types)
+        : importOrder(parseCsv(new TextDecoder().decode(bytes)), draft.unit, draft.types)
+    } catch (error) {
+      parsed = { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+    if (!parsed.ok) {
+      showNotice(`${file.name}: ${parsed.error}`, true)
       return
     }
-    notice = null
-    store.edit(() => draft)
+    const { imported } = parsed
+    if (
+      draft.types.length > 0 &&
+      !window.confirm(
+        `Replace the current ${draft.types.length} box rows with the ${imported.types.length} rows from ${file.name}?`,
+      )
+    ) {
+      return
+    }
+    store.edit((d) => edits.applyImport(d, imported))
+    const shown = imported.notes.slice(0, 3).join('. ')
+    const more = imported.notes.length > 3 ? ` (+${imported.notes.length - 3} more)` : ''
+    showNotice(
+      `Imported ${imported.types.length} rows, ${imported.boxes} boxes, from ${file.name}.` +
+        (shown ? ` ${shown}${more}.` : ''),
+      false,
+    )
   }
 
   function createRow(id: string): HTMLLIElement {
@@ -354,12 +395,15 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
 
     const result = derived.result
     excelButton.disabled = !result
-    footerHint.classList.toggle('error', notice !== null)
-    setText(footerHint, notice ?? (!result ? 'Fix the inputs first' : 'Results update as you type'))
+    footerHint.classList.toggle('error', notice?.error ?? false)
+    setText(
+      footerHint,
+      notice?.text ?? (!result ? 'Fix the inputs first' : 'Results update as you type'),
+    )
   }
 
-  store.subscribe(() => {
-    notice = null
+  store.subscribe((state) => {
+    if (notice && state.draft !== notice.draft) notice = null
   })
 
   return { render }
