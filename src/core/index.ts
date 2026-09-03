@@ -15,4 +15,14 @@ export {
   type OptimizeOptions,
   type OptimizeProgress,
 } from './optimizer'
+export {
+  DEFAULT_MAX_CONTAINERS,
+  DEFAULT_OPTIMIZE_RUNS,
+  packMany,
+  type MultiPackOptions,
+  type MultiPackProgress,
+  type MultiPackResult,
+  type MultiPackStats,
+  type MultiStatus,
+} from './multi'
 export { MAX_DIM, MAX_QTY, validateScenario, type ValidationIssue } from './validate'

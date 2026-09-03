@@ -1,15 +1,14 @@
 import {
-  pack,
+  packMany,
   validateScenario,
   type BoxType,
   type Container,
-  type Objective,
-  type OptimizeResult,
+  type MultiPackResult,
   type PackResult,
   type Scenario,
 } from '../core'
-import { exampleScenario } from '../scenarios'
 import { catalogTexts, findCatalogItem } from './catalogSearch'
+import { exampleDraft } from './example'
 import { nextColor } from './palette'
 import { CONTAINER_TYPES, presetFor, presetTexts, type ContainerType } from './presets'
 import { UNITS, parseCount, parseLength, scaleFor, toInt, type Unit } from './units'
@@ -55,7 +54,8 @@ export interface Derived {
   /** Field path (e.g. "types[1].dims.h") to message. Empty when the draft is valid. */
   issues: Record<string, string>
   scenario: Scenario | null
-  result: PackResult | null
+  /** First-fit packing into as many containers as needed. The optimizer may improve on it later. */
+  result: MultiPackResult | null
   /** True while a recompute is pending after an edit. */
   stale: boolean
 }
@@ -68,6 +68,8 @@ export interface ViewState {
   showContainer: boolean
   /** Box type highlighted from the legend or the sidebar. */
   hoverTypeId: string | null
+  /** Index of the container shown in 3D. Clamped to what exists when read. */
+  container: number
 }
 
 export const DEFAULT_VIEW: ViewState = {
@@ -75,25 +77,25 @@ export const DEFAULT_VIEW: ViewState = {
   layer: null,
   showContainer: true,
   hoverTypeId: null,
+  container: 0,
 }
 
-/** Optimizer run state. Any edit of the draft resets it to idle. */
+/** Background optimizer state. Any edit of the draft resets it to idle. */
 export interface OptimizeUiState {
   status: 'idle' | 'running' | 'done' | 'failed'
-  objective: Objective
   runs: number
   maxRuns: number
-  bestKept: number
-  result: OptimizeResult | null
+  /** Containers the optimizer has finished so far. */
+  containers: number
+  result: MultiPackResult | null
   error: string | null
 }
 
 export const DEFAULT_OPTIMIZE: OptimizeUiState = {
   status: 'idle',
-  objective: 'keep-most-boxes',
   runs: 0,
   maxRuns: 0,
-  bestKept: 0,
+  containers: 0,
   result: null,
   error: null,
 }
@@ -105,11 +107,28 @@ export interface AppState {
   optimize: OptimizeUiState
 }
 
-/** The packing to display: the optimizer's proposal while one is shown, otherwise the current result. */
-export function shownResult(state: AppState): PackResult | null {
+/** Fewer containers wins; with the same count, more boxes placed wins. */
+function worse(a: MultiPackResult, b: MultiPackResult): boolean {
+  return (
+    a.containers.length > b.containers.length ||
+    (a.containers.length === b.containers.length && a.stats.placed < b.stats.placed)
+  )
+}
+
+/** The packing to display: the optimizer's once it is in and not worse, otherwise first fit. */
+export function shownResult(state: AppState): MultiPackResult | null {
+  const quick = state.derived.result
   const o = state.optimize
-  if (o.status === 'done' && o.result) return o.result.result
-  return state.derived.result
+  if (o.status === 'done' && o.result && quick && !worse(o.result, quick)) return o.result
+  return quick
+}
+
+/** The container selected for the 3D view, with its index clamped to what exists. */
+export function shownContainer(state: AppState): { index: number; packing: PackResult | null } {
+  const result = shownResult(state)
+  const n = result?.containers.length ?? 0
+  const index = n === 0 ? 0 : Math.min(Math.max(0, state.view.container), n - 1)
+  return { index, packing: result?.containers[index] ?? null }
 }
 
 // ---------------------------------------------------------------------------
@@ -140,7 +159,7 @@ export function draftFromScenario(scenario: Scenario, unit: Unit): Draft {
   }
 }
 
-export const exampleDraft = (): Draft => draftFromScenario(exampleScenario(), 'in')
+export { exampleDraft } from './example'
 
 const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 const NO_DIMS = { l: NaN, w: NaN, h: NaN }
@@ -219,7 +238,7 @@ export function derive(draft: Draft): Derived {
   }
 
   const scenario: Scenario = { container, types, keepUpright: draft.keepUpright }
-  const result = pack(container, types, { keepUpright: draft.keepUpright })
+  const result = packMany(container, types, { keepUpright: draft.keepUpright })
   return { scale, issues, scenario, result, stale: false }
 }
 
@@ -434,7 +453,7 @@ export class Store {
       ...this.state,
       draft,
       derived: { ...this.state.derived, stale: true },
-      optimize: { ...DEFAULT_OPTIMIZE, objective: this.state.optimize.objective },
+      optimize: DEFAULT_OPTIMIZE,
     }
     saveDraft(this.storage, draft)
     this.emit()

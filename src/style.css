@@ -19,6 +19,7 @@
   --fits: #16a34a;
   --not-found: #d97706;
   --impossible: #dc2626;
+  --multi: #2563eb;
   --invalid: #6b7280;
 
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -538,6 +539,20 @@ button.primary:disabled {
   background: var(--impossible);
 }
 
+.status[data-status='multi'] .badge {
+  background: var(--multi);
+}
+
+.status[data-status='limit'] .badge {
+  background: var(--not-found);
+}
+
+.status .progress {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .status .message {
   margin-top: 10px;
 }
@@ -609,9 +624,85 @@ button.primary:disabled {
 }
 
 .legend-count {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
   font-family: var(--mono);
   font-size: 13px;
   font-variant-numeric: tabular-nums;
+}
+
+.legend-here {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+/* Container list (also the selector for the 3D view) ----------------------- */
+
+.containers {
+  margin-bottom: 20px;
+}
+
+.containers h2 {
+  margin-bottom: 10px;
+  color: var(--muted);
+}
+
+.container-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.container-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.container-row:hover {
+  border-color: var(--muted);
+}
+
+.container-row.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(242, 179, 61, 0.25);
+}
+
+.container-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.container-meta {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.fill-bar {
+  grid-column: 1 / -1;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--stage-bg);
+}
+
+.fill-bar-value {
+  display: block;
+  height: 100%;
+  background: var(--accent);
 }
 
 .legend-row.short .legend-count {
@@ -688,8 +779,8 @@ button.primary:disabled {
   z-index: 2;
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 6px 10px;
+  gap: 10px;
+  padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.92);
@@ -737,11 +828,11 @@ button.primary:disabled {
 }
 
 .layer span {
-  min-width: 118px;
+  min-width: 108px;
 }
 
 .layer input {
-  width: 120px;
+  width: 90px;
   margin: 0;
   accent-color: var(--accent);
 }
@@ -750,6 +841,26 @@ button.primary:disabled {
   padding: 3px 8px;
   font-size: 12px;
   color: var(--muted);
+}
+
+.container-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.container-switch span {
+  min-width: 100px;
+  text-align: center;
+}
+
+.stage-toolbar .container-switch button.ghost {
+  padding: 0 6px;
+  font-size: 16px;
+  line-height: 1.2;
 }
 
 .stage-toolbar button.ghost:hover {
@@ -805,86 +916,18 @@ button.primary:disabled {
 
 /* Optimize ---------------------------------------------------------------- */
 
-.optimize-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 8px;
-}
-
-.optimize-row select {
-  height: 38px !important;
-  font-size: 12px;
-}
-
-.optimize-popover {
-  position: absolute;
-  left: 12px;
-  bottom: 12px;
-  z-index: 2;
-  width: 320px;
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--panel-bg);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-}
-
-.popover-title {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-bottom: 10px;
-}
-
-.reductions li {
-  display: grid;
-  grid-template-columns: 12px 1fr auto;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 0;
-  border-top: 1px solid var(--border);
-}
-
-.reduction-change {
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-  color: var(--not-found);
-}
-
-.optimize-popover > .hint {
-  margin-top: 8px;
-}
-
-.popover-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 12px;
-}
-
-.popover-actions .primary {
-  flex: 1;
-  height: 34px;
-}
-
-.popover-actions .ghost {
-  color: var(--muted);
-}
-
-.popover-actions .ghost:hover {
-  color: var(--fg);
-  background: var(--stage-bg);
-}
-
 /* Phase 6 polish ---------------------------------------------------------- */
 
 .file-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 4px;
 }
 
 .file-row button {
+  padding: 4px 2px;
   font-size: 12px;
+  white-space: nowrap;
 }
 
 button.ghost:disabled {
@@ -909,8 +952,5 @@ button.ghost:disabled:hover {
 @media (max-width: 900px) {
   .stage-table {
     padding-top: 100px;
-  }
-  .optimize-popover {
-    width: calc(100% - 24px);
   }
 }

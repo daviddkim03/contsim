@@ -1,33 +1,22 @@
 /**
  * Human-readable descriptions of the current state, shared by the status
- * panel, the sidebar and the Excel report so they never disagree.
+ * panel and the Excel report so they never disagree.
  */
 
-import { describeImpossibility, type Objective } from '../core'
+import { describeImpossibility, type MultiPackResult } from '../core'
+import { presetFor } from './presets'
 import type { Derived, Draft } from './state'
 import { formatLength, formatVolume } from './units'
 
-export type Level = 'fits' | 'not-found' | 'impossible' | 'invalid'
-
-export const LEVEL_LABELS: Record<Level, string> = {
-  fits: 'Fits',
-  'not-found': "Doesn't fit",
-  impossible: 'Impossible',
-  invalid: 'Fix inputs',
-}
-
-export const OBJECTIVE_LABELS: Record<Objective, string> = {
-  'keep-most-boxes': 'Keep most boxes',
-  'keep-most-volume': 'Keep most volume',
-  'cut-evenly': 'Cut evenly',
-}
+export type Level = 'fits' | 'multi' | 'impossible' | 'limit' | 'invalid'
 
 export interface StatusSummary {
   level: Level
+  /** Badge text: "Fits", "3 containers", "Impossible", ... */
   label: string
   /** One sentence for the badge's message line. */
   text: string
-  /** Extra lines: the fields to fix, or the box types left out. */
+  /** Extra lines: the fields to fix, the box types left out, or a note about the rest. */
   lines: string[]
 }
 
@@ -46,8 +35,24 @@ export function describeIssue(path: string, message: string, draft: Draft): stri
   return `${path}: ${message}`
 }
 
-export function summarizeStatus(draft: Draft, derived: Derived): StatusSummary {
-  const { result, scenario, scale, issues } = derived
+const boxes = (n: number) => `${n} ${n === 1 ? 'box' : 'boxes'}`
+/** Box types listed one per line before the rest is summarized. */
+const MAX_LISTED_TYPES = 5
+
+/** "one 20 ft container", "3 × 20 ft containers", "2 containers". */
+export function describeContainers(draft: Draft, n: number): string {
+  const preset = presetFor(draft.containerType)
+  if (n === 1) return preset ? `one ${preset.name} container` : 'one container'
+  return preset ? `${n} × ${preset.name} containers` : `${n} containers`
+}
+
+/** Describes `result`, which defaults to the first-fit packing; pass the shown one for the panel. */
+export function summarizeStatus(
+  draft: Draft,
+  derived: Derived,
+  result: MultiPackResult | null = derived.result,
+): StatusSummary {
+  const { scenario, scale, issues } = derived
   const lines: string[] = []
 
   if (!result || !scenario) {
@@ -55,7 +60,7 @@ export function summarizeStatus(draft: Draft, derived: Derived): StatusSummary {
     for (const [path, msg] of entries.slice(0, 4)) lines.push(describeIssue(path, msg, draft))
     return {
       level: 'invalid',
-      label: LEVEL_LABELS.invalid,
+      label: 'Fix inputs',
       text:
         entries.length === 1
           ? 'One field needs attention.'
@@ -63,36 +68,52 @@ export function summarizeStatus(draft: Draft, derived: Derived): StatusSummary {
       lines,
     }
   }
-  if (result.status === 'fits') {
+
+  const { requested, placed, containers } = result.stats
+  if (result.status === 'impossible') {
+    const oversize = scenario.types.filter((t) => result.unplaced[t.id])
+    for (const t of oversize.slice(0, MAX_LISTED_TYPES)) {
+      lines.push(`${t.name}: ${boxes(result.unplaced[t.id]!)} cannot ship in this container`)
+    }
+    if (oversize.length > MAX_LISTED_TYPES) {
+      lines.push(`and ${oversize.length - MAX_LISTED_TYPES} more box types`)
+    }
+    if (placed > 0) {
+      lines.push(`Everything else fits in ${describeContainers(draft, containers)}.`)
+    }
     return {
-      level: 'fits',
-      label: LEVEL_LABELS.fits,
-      text:
-        result.stats.requested === 0
-          ? 'Add a box type to get started.'
-          : `All ${result.stats.requested} boxes placed.`,
+      level: 'impossible',
+      label: 'Impossible',
+      text: describeImpossibility(result.impossibility!, scenario.types, {
+        length: (n) => formatLength(n, scale, draft.unit),
+        volume: (n) => formatVolume(n, scale, draft.unit),
+      }),
       lines,
     }
   }
-  if (result.status === 'not-found') {
-    for (const t of scenario.types) {
-      const n = result.unplaced[t.id]
-      if (n) lines.push(`${t.name}: ${n} left out`)
-    }
+  if (result.status === 'limit') {
     return {
-      level: 'not-found',
-      label: LEVEL_LABELS['not-found'],
-      text: `Placed ${result.stats.placed} of ${result.stats.requested}. No arrangement found for the rest; it may still be possible. Try Optimize or reduce quantities.`,
+      level: 'limit',
+      label: 'Too many',
+      text: `Needs more than ${containers} containers. Showing the first ${containers}, holding ${placed} of ${requested} boxes.`,
+      lines,
+    }
+  }
+  if (requested === 0) {
+    return { level: 'fits', label: 'Fits', text: 'Add a cabinet to get started.', lines }
+  }
+  if (containers <= 1) {
+    return {
+      level: 'fits',
+      label: 'Fits',
+      text: `All ${boxes(requested)} placed in ${describeContainers(draft, 1)}.`,
       lines,
     }
   }
   return {
-    level: 'impossible',
-    label: LEVEL_LABELS.impossible,
-    text: describeImpossibility(result.impossibility!, scenario.types, {
-      length: (n) => formatLength(n, scale, draft.unit),
-      volume: (n) => formatVolume(n, scale, draft.unit),
-    }),
+    level: 'multi',
+    label: `${containers} containers`,
+    text: `All ${boxes(requested)} placed in ${describeContainers(draft, containers)}.`,
     lines,
   }
 }

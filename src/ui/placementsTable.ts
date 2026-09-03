@@ -15,7 +15,7 @@ export function mountPlacementsTable(root: HTMLElement, store: Store): Panel {
       <div class="table-wrap">
         <table>
           <thead>
-            <tr><th class="num">#</th><th>Box</th><th class="num">x</th><th class="num">y</th><th class="num">z</th><th class="num">Size</th></tr>
+            <tr><th class="num">Container</th><th class="num">#</th><th>Box</th><th class="num">x</th><th class="num">y</th><th class="num">z</th><th class="num">Size</th></tr>
           </thead>
           <tbody></tbody>
         </table>
@@ -40,25 +40,29 @@ export function mountPlacementsTable(root: HTMLElement, store: Store): Panel {
       }
       const types = new Map(scenario.types.map((t) => [t.id, t]))
       const n = (v: number) => formatNumber(v, scale)
-      const rows = result.placements.map((p, i) => {
-        const type = types.get(p.typeId)
-        const swatch = h('span', { class: 'swatch' })
-        swatch.style.background = type?.color ?? '#888888'
-        return h('tr', {}, [
-          h('td', { class: 'num', text: String(i + 1) }),
-          h('td', {}, [swatch, ' ', type?.name ?? p.typeId]),
-          h('td', { class: 'num', text: n(p.x) }),
-          h('td', { class: 'num', text: n(p.y) }),
-          h('td', { class: 'num', text: n(p.z) }),
-          h('td', { class: 'num', text: `${n(p.dx)} × ${n(p.dy)} × ${n(p.dz)}` }),
-        ])
-      })
+      const rows = result.containers.flatMap((c, k) =>
+        c.placements.map((p, i) => {
+          const type = types.get(p.typeId)
+          const swatch = h('span', { class: 'swatch' })
+          swatch.style.background = type?.color ?? '#888888'
+          return h('tr', {}, [
+            h('td', { class: 'num', text: String(k + 1) }),
+            h('td', { class: 'num', text: String(i + 1) }),
+            h('td', {}, [swatch, ' ', type?.name ?? p.typeId]),
+            h('td', { class: 'num', text: n(p.x) }),
+            h('td', { class: 'num', text: n(p.y) }),
+            h('td', { class: 'num', text: n(p.z) }),
+            h('td', { class: 'num', text: `${n(p.dx)} × ${n(p.dy)} × ${n(p.dz)}` }),
+          ])
+        }),
+      )
       tbody.replaceChildren(...rows)
       empty.hidden = rows.length > 0
+      const containers = result.containers.length
       setText(
         summary,
         rows.length > 0
-          ? `${rows.length} placed, positions in ${draft.unit} from the back-bottom-left corner`
+          ? `${rows.length} placed in ${containers} ${containers === 1 ? 'container' : 'containers'}, positions in ${draft.unit} from the back-bottom-left corner`
           : '',
       )
     },

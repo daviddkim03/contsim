@@ -1,10 +1,7 @@
-import type { Objective } from '../core'
 import { findCatalogItem, formatCatalogDims, searchCatalog } from './catalogSearch'
 import { attachCombobox } from './combobox'
-import { OBJECTIVE_LABELS } from './describe'
 import { download, h, query, setInvalid, setValue, setText } from './dom'
 import { wireHover } from './legend'
-import type { OptimizeController } from './optimizeClient'
 import { CONTAINER_PRESETS, presetFor, type ContainerType } from './presets'
 import { buildReport, EXCEL_FILENAME } from './report'
 import {
@@ -31,14 +28,9 @@ const TYPE_FIELDS: TypeField[] = ['name', 'l', 'w', 'h', 'qty']
 const DIM_FIELDS: TypeField[] = ['l', 'w', 'h']
 /** Option id of the "Custom size" entry at the end of every catalog search. */
 const CUSTOM_OPTION = '\u0000custom'
-const OBJECTIVES = Object.entries(OBJECTIVE_LABELS) as [Objective, string][]
 export const JSON_FILENAME = 'contsim-scenario.json'
 
-export function mountSidebar(
-  root: HTMLElement,
-  store: Store,
-  optimizer: OptimizeController,
-): Panel {
+export function mountSidebar(root: HTMLElement, store: Store): Panel {
   root.innerHTML = `
     <header class="brand">
       <h1>contsim</h1>
@@ -84,18 +76,11 @@ export function mountSidebar(
     </section>
 
     <footer class="sidebar-actions">
-      <div class="optimize-row">
-        <button type="button" class="primary" data-action="optimize">Optimize</button>
-        <select data-field="objective" aria-label="Optimize objective">
-          ${OBJECTIVES.map(([value, label]) => `<option value="${value}">${label}</option>`).join('')}
-        </select>
-      </div>
-      <button type="button" class="ghost" data-action="cancel-optimize" hidden>Cancel</button>
+      <button type="button" class="primary" data-action="export-excel">Export Excel</button>
       <div class="file-row">
         <button type="button" class="ghost" data-action="example">Load example</button>
         <button type="button" class="ghost" data-action="import">Import JSON</button>
         <button type="button" class="ghost" data-action="export-json">Export JSON</button>
-        <button type="button" class="ghost" data-action="export-excel">Export Excel</button>
         <input type="file" accept="application/json,.json" data-field="import-file" hidden>
       </div>
       <p class="hint" data-role="footer-hint">Results update as you type</p>
@@ -111,9 +96,6 @@ export function mountSidebar(
   const uprightCheckbox = query<HTMLInputElement>(root, '[data-field="keepUpright"]')
   const list = query<HTMLUListElement>(root, '.box-list')
   const empty = query<HTMLElement>(root, '.empty')
-  const optimizeButton = query<HTMLButtonElement>(root, '[data-action="optimize"]')
-  const cancelButton = query<HTMLButtonElement>(root, '[data-action="cancel-optimize"]')
-  const objectiveSelect = query<HTMLSelectElement>(root, '[data-field="objective"]')
   const importInput = query<HTMLInputElement>(root, '[data-field="import-file"]')
   const excelButton = query<HTMLButtonElement>(root, '[data-action="export-excel"]')
   const footerHint = query<HTMLElement>(root, '[data-role="footer-hint"]')
@@ -152,9 +134,6 @@ export function mountSidebar(
     if (target === uprightCheckbox) {
       store.edit((d) => edits.setKeepUpright(d, uprightCheckbox.checked))
     }
-    if (target === objectiveSelect) {
-      store.setOptimize({ objective: objectiveSelect.value as Objective })
-    }
     if (target === importInput) void importFile(importInput.files?.[0])
   })
 
@@ -176,12 +155,6 @@ export function mountSidebar(
         break
       case 'dec':
         if (id) store.edit((d) => edits.stepQty(d, id, -1))
-        break
-      case 'optimize':
-        optimizer.start()
-        break
-      case 'cancel-optimize':
-        optimizer.cancel()
         break
       case 'example': {
         const current = JSON.stringify(store.get().draft)
@@ -347,7 +320,7 @@ export function mountSidebar(
   }
 
   function render(state: AppState): void {
-    const { draft, derived, optimize } = state
+    const { draft, derived } = state
     const preset = presetFor(draft.containerType)
     const container = containerTexts(draft)
     setValue(containerTypeSelect, draft.containerType)
@@ -379,27 +352,10 @@ export function mountSidebar(
     for (const row of existing.values()) row.remove()
     empty.hidden = draft.types.length > 0
 
-    const running = optimize.status === 'running'
     const result = derived.result
-    optimizeButton.disabled = !result || result.status === 'fits' || running || derived.stale
-    setText(
-      optimizeButton,
-      running ? `Optimizing ${optimize.runs} / ${optimize.maxRuns}` : 'Optimize',
-    )
-    cancelButton.hidden = !running
     excelButton.disabled = !result
-    setValue(objectiveSelect, optimize.objective)
-    objectiveSelect.disabled = running
     footerHint.classList.toggle('error', notice !== null)
-    setText(
-      footerHint,
-      notice ??
-        (!result
-          ? 'Fix the inputs first'
-          : result.status === 'fits'
-            ? 'Everything fits, nothing to optimize'
-            : 'Results update as you type'),
-    )
+    setText(footerHint, notice ?? (!result ? 'Fix the inputs first' : 'Results update as you type'))
   }
 
   store.subscribe(() => {

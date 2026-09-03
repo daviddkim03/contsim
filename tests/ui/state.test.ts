@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DEFAULT_OPTIMIZE,
   Store,
   STORAGE_KEY,
   derive,
@@ -9,9 +10,12 @@ import {
   loadDraft,
   parseDraft,
   saveDraft,
+  shownContainer,
+  shownResult,
   type Draft,
 } from '../../src/ui/state'
 import { mixedScenario } from '../../src/scenarios'
+import { packMany } from '../../src/core'
 
 const mixed = () => draftFromScenario(mixedScenario(), 'in')
 
@@ -256,10 +260,11 @@ describe('Store', () => {
     const store = new Store(mixed(), storage, 0)
     const seen: boolean[] = []
     store.subscribe((s) => seen.push(s.derived.stale))
-    // 26 pallet boxes exceed the container volume, so the recompute must report impossible.
+    // 26 pallet boxes exceed one container, so the recompute must open another.
     store.edit((d) => edits.stepQty(d, 'pallet', 20))
     expect(seen).toEqual([true, false])
-    expect(store.get().derived.result?.status).toBe('impossible')
+    expect(store.get().derived.result?.status).toBe('fits')
+    expect(store.get().derived.result?.containers.length).toBeGreaterThan(1)
     expect(loadDraft(storage).types[0]?.qty).toBe('26')
   })
 
@@ -289,6 +294,7 @@ describe('view state', () => {
       layer: null,
       showContainer: true,
       hoverTypeId: null,
+      container: 0,
     })
     let notifications = 0
     store.subscribe(() => notifications++)
@@ -301,12 +307,49 @@ describe('view state', () => {
 })
 
 describe('optimize state', () => {
-  it('starts idle, accepts patches, and resets on any edit except the objective', () => {
+  it('starts idle, accepts patches, and resets on any edit', () => {
     const store = new Store(mixed(), null, 0)
     expect(store.get().optimize.status).toBe('idle')
-    store.setOptimize({ objective: 'cut-evenly', status: 'running', runs: 3, maxRuns: 200 })
-    expect(store.get().optimize).toMatchObject({ status: 'running', runs: 3 })
+    store.setOptimize({ status: 'running', runs: 3, maxRuns: 400, containers: 1 })
+    expect(store.get().optimize).toMatchObject({ status: 'running', runs: 3, containers: 1 })
     store.edit((d) => edits.stepQty(d, 'pallet', 1))
-    expect(store.get().optimize).toMatchObject({ status: 'idle', runs: 0, objective: 'cut-evenly' })
+    expect(store.get().optimize).toEqual(DEFAULT_OPTIMIZE)
+  })
+})
+
+describe('shownResult and shownContainer', () => {
+  const overflow = () => edits.stepQty(mixed(), 'pallet', 20)
+
+  it('shows first fit until the optimizer is in, then the better of the two', () => {
+    const store = new Store(overflow(), null, 0)
+    const quick = store.get().derived.result!
+    expect(shownResult(store.get())).toBe(quick)
+    const scenario = store.get().derived.scenario!
+    const optimized = packMany(scenario.container, scenario.types, {
+      keepUpright: false,
+      optimizeRuns: 200,
+    })
+    store.setOptimize({ status: 'done', result: optimized })
+    expect(shownResult(store.get())).toBe(optimized)
+
+    // A result that needs more containers is never shown.
+    const worse = { ...optimized, containers: [...optimized.containers, optimized.containers[0]!] }
+    store.setOptimize({ status: 'done', result: worse })
+    expect(shownResult(store.get())).toBe(quick)
+  })
+
+  it('clamps the selected container to what exists', () => {
+    const store = new Store(overflow(), null, 0)
+    const n = store.get().derived.result!.containers.length
+    expect(n).toBeGreaterThan(1)
+    expect(shownContainer(store.get())).toMatchObject({ index: 0 })
+    store.setView({ container: 1 })
+    expect(shownContainer(store.get()).packing).toBe(store.get().derived.result!.containers[1])
+    store.setView({ container: 99 })
+    expect(shownContainer(store.get()).index).toBe(n - 1)
+    store.setView({ container: -5 })
+    expect(shownContainer(store.get()).index).toBe(0)
+    store.edit((d) => edits.setContainer(d, 'l', '10'))
+    expect(shownContainer(store.get())).toEqual({ index: 0, packing: null })
   })
 })

@@ -20,6 +20,8 @@ All six phases were built and verified on 2026-08-28: 116 unit tests, 14 Playwri
 
 Added on 2026-09-02: Export Excel (a dependency-free .xlsx writer, section 5.4) and a GitHub Actions workflow that runs the checks and deploys to GitHub Pages.
 
+Added on 2026-09-03: container presets and a cabinet catalog with a searchable picker (section 5.5), and packing into as many containers as the order needs with automatic background optimization (sections 4.4 and 5.6). The Optimize button, its objectives and the Apply / Discard popover are gone; the optimizer's job is now to fill each container as densely as possible.
+
 ## 1. Goals and non-goals
 
 Goals (v1):
@@ -273,6 +275,14 @@ Notes:
 - Budget: cap at ~200 packer runs or ~3 s, whichever comes first. Report progress. Always run in a Web Worker so the UI never freezes; support cancel.
 - The result is a proposal. The UI shows per-type reductions ("Box B: 10 -> 7") with Apply / Discard. Apply writes the quantities into the box list, which triggers the normal live recompute.
 
+### 4.4 Many containers (`src/core/multi.ts`)
+
+`packMany(container, types, opts)` fills containers of one size one after another: each container gets what the packer can place from what is left, and the remainder moves on to a fresh container, up to a cap (50). Every packable type fits in an empty container, so the loop always terminates with everything placed; a type that fits in no container in any allowed orientation is reported up front (`status: 'impossible'`, `impossibility: { kind: 'oversize' }`) and everything else is still packed.
+
+With `optimizeRuns > 0` each container instead receives the largest-volume subset that `optimize()` (section 4.3, objective keep-most-volume) can fit within the remaining run budget, which is shared across containers; when the budget runs out, later containers fall back to a single first-fit run. The result is deterministic either way. `onProgress` reports runs and finished containers and can stop the optimizing early, still returning a complete packing.
+
+The UI runs the plain variant synchronously in `derive()` (a few milliseconds) for instant feedback and the budgeted variant in a worker; `shownResult()` shows the worker's packing once it is in, unless it needs more containers or places fewer boxes, which greedy per-container filling can in principle do.
+
 ## 5. UI
 
 ### 5.1 Layout
@@ -309,7 +319,7 @@ The takeoff-tool screenshot is the layout and style reference: dark left sidebar
   - Fix inputs (grey): some field is invalid.
 - 3D view: container as a wireframe over a light floor, boxes as solid colored cuboids with dark edges, one stable color per type. Hovering a legend row or a sidebar row highlights that type (everything else fades). The layer slider hides every box whose bottom is above the chosen height so the user can look inside. The camera follows the container until the user first orbits; after that it only moves on Reset view or when the container dims change. A 3D / Table toggle swaps the center panel for the placement list. Rendering is on demand, not a loop. Without WebGL the app falls back to the table.
 - Unplaced boxes: shown in the legend as "7/10" and listed under the status.
-- Optimize: runs in a Web Worker; the button shows progress ("Optimizing 34 / 200") and a Cancel button appears (cancel terminates the worker). The result popover (bottom-left of the stage) lists per-type reductions ("40 -> 25") with Apply / Discard, and the 3D view and table preview the proposed packing until the user decides. Any edit discards a pending proposal. An objective dropdown sits next to the button (default keep-most-boxes). Measured on the example: keep-most-boxes removes 2 pallet boxes and keeps 136 of 138, in well under a second.
+- Optimize: automatic, see 5.6. (Until 2026-09-03 this was a button with three objectives and an Apply / Discard popover proposing quantity reductions; with overflow going to another container, reductions no longer make sense.)
 - Persistence: the current scenario is saved to localStorage on every change. Export JSON downloads `contsim-scenario.json`; Import JSON reads one back (a file that is not a scenario shows a message and changes nothing). "Load example" restores the sample scenario after a confirmation. Export Excel downloads `contsim-packing.xlsx` (section 5.4).
 - Validation: non-numeric, zero, negative, or absurdly large dims mark the field invalid; the packer does not run; status shows "Fix inputs". Never crash on bad input.
 
@@ -326,6 +336,18 @@ Export Excel writes what the screen shows, so a colleague without the app gets t
 - Placements: one row per placed box in placement order: box, x, y, z (min corner), oriented length, width, height, and top (z + height).
 
 The writer is in-house (`src/ui/xlsx.ts` + `src/ui/zip.ts`, about 300 lines): SpreadsheetML with inline strings, a bold frozen header row, column widths, and a percent number format, packaged in a ZIP that deflates through the browser's CompressionStream (stored when unavailable). The available libraries were rejected on purpose: SheetJS on npm is stale with open advisories, and ExcelJS is larger than three.js. The subset of the format used here has not changed since 2006. Tests read the file back with an independent ZIP reader that checks every CRC with Node's zlib, and the e2e test downloads a real file from the production build.
+
+### 5.5 Container presets and the cabinet catalog
+
+The container is chosen from a dropdown of standard dry containers (10 ft, 20 ft, 20 ft high cube, 40 ft, 40 ft high cube, 45 ft high cube) whose typical interior sizes are kept in millimetres (`src/ui/presets.ts`) and converted to the display unit with sensible decimals; the L / W / H fields show the numbers and are locked. "Custom size" unlocks them, starting from the preset's numbers, and the custom values survive switching back and forth.
+
+Box rows pick from the cabinet catalog (`data/catalog.xlsx` -> `npm run catalog` -> `src/catalog.ts`, 174 codes with W x D x H in inches). The row's text input is a combobox (`src/ui/combobox.ts`): typing filters by code (exact, prefix, substring) or by size in the display unit or inches, sizes typed in W x D x H order rank first, and "Custom size" at the end of the list turns the row into a custom box named after the typed text with editable dimensions. Width runs along the container's length, depth along its width, height is up. Rows saved before the catalog existed load as custom boxes.
+
+### 5.6 Many containers and automatic optimization
+
+The status badge reads Fits (one container), "N containers" (blue), Impossible (a type that fits in no container; the rest is still packed and the badge's details say so), Too many (container cap), or Fix inputs. The side panel lists the containers with box counts and fill bars; clicking one, or the "Container 1 of N" switcher in the toolbar, selects what the 3D view shows. The legend shows placed / requested per type plus how many are in the selected container. The table lists every placement with its container number, and the Excel export gains a Containers sheet and a Container column.
+
+Whenever a fresh first-fit result needs more than one container, `src/ui/optimizeClient.ts` starts `packMany` with a 400-run budget in a Web Worker and mirrors progress into the status panel ("Optimizing container fill... 120 / 400 runs"). Any edit terminates the worker; the next settled recompute starts a fresh one. Measured on the example order (150 cabinets, 20 ft): first fit needs 2 containers at 88 % and 65 % fill, the optimizer confirms it in about 50 ms.
 
 ## 6. Tech stack
 
@@ -355,17 +377,23 @@ contsim/
       validate.ts         structural validation (MAX_DIM, MAX_QTY), reports every issue
       packer.ts           extreme-point packer (4.2)
       optimizer.ts        multi-start + add-back (4.3)
+      multi.ts            as many containers as needed, optionally optimized (4.4)
       ordering.ts         orderings + seeded PRNG
       index.ts
-    scenarios.ts          standard containers, mixedScenario() and exampleScenario(); used by tests and "Load example"
+    catalog.ts            generated cabinet catalog (npm run catalog); do not edit
+    scenarios.ts          synthetic scenarios (mixedScenario, exampleScenario) used by the core tests
     ui/
       state.ts            scenario state, reducers, validation, localStorage, JSON import/export
       units.ts            unit labels, integer scaling at the boundary, formatting
       dom.ts              tiny DOM helpers (h, setValue, setInvalid, download)
-      describe.ts         status wording and objective labels shared by legend, sidebar and report
+      describe.ts         status wording shared by the status panel and the report
+      presets.ts          standard container interiors and unit conversion (5.5)
+      catalogSearch.ts    catalog lookup, unit conversion and search ranking (5.5)
+      combobox.ts         searchable dropdown used by the box rows (5.5)
+      example.ts          the order the app opens with
       palette.ts          box type colors
-      sidebar.ts          container inputs, box list, options, Optimize button
-      legend.ts           status panel + legend
+      sidebar.ts          container preset and size, box rows with the catalog picker, export
+      legend.ts           status panel, container list (selector) and legend
       placementsTable.ts  placement list; the center panel until the 3D view exists
       stage.ts            center panel: toolbar (3D/Table, container toggle, layer slider, reset view)
       viewer3d.ts         three.js scene, on-demand rendering, hover dimming, layer visibility
@@ -373,13 +401,15 @@ contsim/
       report.ts           the Excel report: Summary, Boxes and Placements sheets from the state
       xlsx.ts             minimal SpreadsheetML writer (typed cells, header style, percent format)
       zip.ts              minimal ZIP writer (CRC-32, deflate via CompressionStream or stored)
-      optimizeWorker.ts   runs optimize() off the main thread
+      optimizeWorker.ts   runs packMany() with a run budget off the main thread
       optimizeProtocol.ts request / progress / done / error message types
-      optimizeClient.ts   spawns the worker, mirrors progress into the store, cancel = terminate
+      optimizeClient.ts   watches the store and runs the worker whenever more than one container is needed
       palette.ts
     main.ts
+  data/catalog.xlsx       the cabinet catalog as delivered (TYPE, W, D, H)
+  scripts/import-catalog.ts  regenerates src/catalog.ts from it
   tests/
-    core/                 geometry, feasibility, validate, ordering, packer, optimizer tests
+    core/                 geometry, feasibility, validate, ordering, packer, optimizer, multi tests
     ui/                   units and state tests
     e2e/                  Playwright smoke tests against the production build (npm run test:e2e)
     helpers/              independent ZIP and worksheet readers used to verify exports

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { optimize } from '../../src/core'
+import { packMany } from '../../src/core'
 import { buildReport, formatTimestamp } from '../../src/ui/report'
 import {
   DEFAULT_OPTIMIZE,
@@ -30,32 +30,46 @@ describe('formatTimestamp', () => {
 
 describe('buildReport', () => {
   it('returns null while the inputs are invalid', () => {
-    expect(buildReport(stateOf(edits.setContainer(exampleDraft(), 'l', 'abc')))).toBeNull()
+    const draft = edits.setTypeField(exampleDraft(), '36', 'qty', 'abc')
+    expect(buildReport(stateOf(draft))).toBeNull()
   })
 
-  it('summarizes the example scenario, which does not fit', () => {
+  it('summarizes the example order, which needs more than one container', () => {
     const state = stateOf(exampleDraft())
+    const result = state.derived.result!
     const workbook = buildReport(state, now)!
-    expect(workbook.sheets.map((s) => s.name)).toEqual(['Summary', 'Boxes', 'Placements'])
-    const [summary, boxes, placements] = workbook.sheets
+    expect(workbook.sheets.map((s) => s.name)).toEqual([
+      'Summary',
+      'Containers',
+      'Boxes',
+      'Placements',
+    ])
+    const [summary, containers, boxes, placements] = workbook.sheets
     expect(summary!.header).toEqual(['Item', 'Value'])
     expect(summaryOf(summary!.rows)).toMatchObject({
       Exported: '2026-09-02 14:05',
-      Status: "Doesn't fit",
-      Details: expect.stringContaining('Placed 123 of 138.'),
+      Status: `${result.containers.length} containers`,
+      Details: expect.stringContaining('All 150 boxes placed in'),
       Unit: 'in',
-      'Container length (in)': 232,
-      'Container width (in)': 92,
-      'Container height (in)': 94,
-      'Container volume (cu ft)': 1161.07,
+      'Container type': '20 ft',
+      'Container length (in)': 232.2,
+      'Container width (in)': 92.6,
+      'Container height (in)': 94.2,
       'Keep boxes upright': 'No',
-      'Boxes requested': 138,
-      'Boxes placed': 123,
-      'Boxes left out': 15,
-      Fill: { percent: state.derived.result!.stats.fill },
+      'Containers needed': result.containers.length,
+      'Boxes requested': 150,
+      'Boxes placed': 150,
+      'Boxes left out': 0,
+      'Fill, all containers': { percent: result.stats.fill },
       'Placements sheet': expect.stringContaining('Lengths are in inches.'),
     })
-    expect(summaryOf(summary!.rows)).not.toHaveProperty('Optimizer runs')
+    expect(containers!.header).toEqual(['Container', 'Boxes', 'Fill', 'Placed volume (cu ft)'])
+    expect(containers!.rows).toHaveLength(result.containers.length)
+    expect(containers!.rows[0]!.slice(0, 3)).toEqual([
+      1,
+      result.containers[0]!.placements.length,
+      { percent: result.containers[0]!.stats.fill },
+    ])
     expect(boxes!.header.slice(0, 6)).toEqual([
       '#',
       'Box',
@@ -65,6 +79,7 @@ describe('buildReport', () => {
       'Height (in)',
     ])
     expect(placements!.header).toEqual([
+      'Container',
       '#',
       'Box',
       'X (in)',
@@ -79,78 +94,70 @@ describe('buildReport', () => {
 
   it('lists every box type with requested, placed and left-out counts', () => {
     const state = stateOf(exampleDraft())
-    const boxes = buildReport(state, now)!.sheets[1]!.rows
-    expect(boxes).toHaveLength(5)
-    // 48 x 40 x 48 in = 92,160 cu in = 53.33 cu ft each.
-    expect(boxes[0]!.slice(0, 7)).toEqual([1, 'Pallet box', '#f59e0b', 48, 40, 48, 12])
-    expect(boxes[0]![9]).toBe(53.33)
-    expect(boxes[2]!.slice(6, 9)).toEqual([40, 25, 15])
+    const boxes = buildReport(state, now)!.sheets[2]!.rows
+    expect(boxes).toHaveLength(10)
+    // A 36 in base cabinet: 36 x 24 x 34.5 in = 29,808 cu in = 17.25 cu ft.
+    expect(boxes[0]!.slice(0, 9)).toEqual([1, '36', '#f59e0b', 36, 24, 34.5, 20, 20, 0])
+    expect(boxes[0]![9]).toBe(17.25)
     const sum = (column: number) => boxes.reduce((n, row) => n + (row[column] as number), 0)
-    expect(sum(6)).toBe(138)
-    expect(sum(7)).toBe(123)
-    expect(sum(8)).toBe(15)
+    expect(sum(6)).toBe(150)
+    expect(sum(7)).toBe(150)
+    expect(sum(8)).toBe(0)
     const shares = boxes.map((row) => (row[11] as { percent: number }).percent)
     expect(shares.reduce((a, b) => a + b)).toBeCloseTo(state.derived.result!.stats.fill, 6)
   })
 
-  it('lists every placement inside the container in placement order', () => {
+  it('lists every placement with its container, inside the container', () => {
     const state = stateOf(exampleDraft())
-    const placements = buildReport(state, now)!.sheets[2]!.rows
-    expect(placements).toHaveLength(123)
-    expect(placements[0]!.slice(0, 5)).toEqual([1, 'Pallet box', 0, 0, 0])
+    const result = state.derived.result!
+    const placements = buildReport(state, now)!.sheets[3]!.rows
+    expect(placements).toHaveLength(150)
+    expect(placements[0]!.slice(0, 5)).toEqual([1, 1, 'P249624', 0, 0])
+    const perContainer = result.containers.map((c) => c.placements.length)
     placements.forEach((row, i) => {
-      const [n, , x, y, z, dx, dy, dz, top] = row as number[]
-      expect(n).toBe(i + 1)
+      const [container, n, , x, y, z, dx, dy, dz, top] = row as number[]
+      const k = container! - 1
+      expect(n).toBe(i + 1 - perContainer.slice(0, k).reduce((a, b) => a + b, 0))
       expect(top).toBe(z! + dz!)
-      expect(x! + dx!).toBeLessThanOrEqual(232)
-      expect(y! + dy!).toBeLessThanOrEqual(92)
-      expect(z! + dz!).toBeLessThanOrEqual(94)
+      expect(x! + dx!).toBeLessThanOrEqual(232.2)
+      expect(y! + dy!).toBeLessThanOrEqual(92.6)
+      expect(z! + dz!).toBeLessThanOrEqual(94.2)
     })
   })
 
-  it('reports decimals in the chosen unit, unscaled', () => {
+  it('reports in the chosen unit', () => {
     let draft = edits.setUnit(exampleDraft(), 'cm')
-    draft = edits.setContainer(draft, 'l', '232.5')
     draft = edits.setKeepUpright(draft, true)
     const workbook = buildReport(stateOf(draft), now)!
     const summary = summaryOf(workbook.sheets[0]!.rows)
     expect(summary).toMatchObject({
       Unit: 'cm',
-      'Container length (cm)': 232.5,
-      // 232.5 x 92 x 94 cm = 2,010,660 cu cm = 2.011 cu m.
-      'Container volume (m³)': 2.011,
+      'Container length (cm)': 589.8,
+      // 589.8 x 235.2 x 239.3 cm = 33,195,926 cu cm = 33.196 cu m.
+      'Container volume, each (m³)': 33.196,
       'Keep boxes upright': 'Yes',
       'Placements sheet': expect.stringContaining('Lengths are in centimetres.'),
     })
-    expect(workbook.sheets[1]!.header[3]).toBe('Length (cm)')
-    expect(workbook.sheets[1]!.header[9]).toBe('Volume each (m³)')
-    expect(workbook.sheets[2]!.header[2]).toBe('X (cm)')
+    expect(workbook.sheets[2]!.header[3]).toBe('Length (cm)')
+    expect(workbook.sheets[2]!.header[9]).toBe('Volume each (m³)')
+    expect(workbook.sheets[3]!.header[3]).toBe('X (cm)')
   })
 
-  it('describes the Optimize proposal while one is shown', () => {
+  it('reports the optimized packing once it is in', () => {
     const state = stateOf(exampleDraft())
     const scenario = state.derived.scenario!
-    const result = optimize(scenario.container, scenario.types, {
+    const optimized = packMany(scenario.container, scenario.types, {
       keepUpright: false,
-      objective: 'keep-most-boxes',
+      optimizeRuns: 400,
     })
-    const kept = Object.values(result.kept).reduce((a, b) => a + b, 0)
     const workbook = buildReport(
-      { ...state, optimize: { ...DEFAULT_OPTIMIZE, status: 'done', result, runs: result.runs } },
+      { ...state, optimize: { ...DEFAULT_OPTIMIZE, status: 'done', result: optimized } },
       now,
     )!
-    const summary = summaryOf(workbook.sheets[0]!.rows)
-    expect(summary).toMatchObject({
-      Status: 'Optimize proposal',
-      Details: `Keeps ${kept} of 138 boxes with the "Keep most boxes" objective. Not applied yet; the requested quantities do not fit.`,
-      'Boxes requested': 138,
-      'Boxes placed': kept,
-      'Boxes left out': 138 - kept,
-      'Optimizer runs': result.runs,
-    })
-    expect(summary['Optimizer time (ms)']).toBeTypeOf('number')
-    const boxes = workbook.sheets[1]!.rows
-    expect(boxes.map((row) => row[7])).toEqual(scenario.types.map((t) => result.kept[t.id]))
-    expect(workbook.sheets[2]!.rows).toHaveLength(result.result.placements.length)
+    expect(summaryOf(workbook.sheets[0]!.rows)['Containers needed']).toBe(
+      optimized.containers.length,
+    )
+    expect(workbook.sheets[1]!.rows).toHaveLength(optimized.containers.length)
+    expect(workbook.sheets[3]!.rows).toHaveLength(150)
   })
 })

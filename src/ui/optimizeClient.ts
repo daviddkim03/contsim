@@ -1,18 +1,19 @@
-import { DEFAULT_MAX_RUNS, optimize } from '../core'
+import { DEFAULT_OPTIMIZE_RUNS, packMany } from '../core'
 import type { OptimizeMessage, OptimizeRequest } from './optimizeProtocol'
 import type { Store } from './state'
 
-export interface OptimizeController {
-  start(): void
-  cancel(): void
+export interface AutoOptimizer {
+  dispose(): void
 }
 
 /**
- * Runs the optimizer in a Web Worker so the page stays responsive, and
- * mirrors progress and the result into the store. Cancelling terminates the
- * worker; the next run gets a fresh one.
+ * Improves the container fill in the background. Whenever the inputs settle
+ * on a packing that needs more than one container, the optimizer runs in a
+ * Web Worker and its packing replaces the first-fit one as soon as it is in
+ * (see shownResult). An edit discards the run; the next recompute starts a
+ * fresh one. Progress is mirrored into the store for the status panel.
  */
-export function createOptimizeController(store: Store): OptimizeController {
+export function startAutoOptimizer(store: Store): AutoOptimizer {
   let worker: Worker | null = null
 
   function dispose(): void {
@@ -23,7 +24,11 @@ export function createOptimizeController(store: Store): OptimizeController {
   function finish(message: OptimizeMessage): void {
     switch (message.type) {
       case 'progress':
-        store.setOptimize({ runs: message.progress.runs, bestKept: message.progress.bestKept })
+        store.setOptimize({
+          runs: message.progress.runs,
+          maxRuns: message.progress.maxRuns,
+          containers: message.progress.containers,
+        })
         break
       case 'done':
         dispose()
@@ -38,10 +43,9 @@ export function createOptimizeController(store: Store): OptimizeController {
 
   function runInline(request: OptimizeRequest): void {
     try {
-      const result = optimize(request.container, request.types, {
+      const result = packMany(request.container, request.types, {
         keepUpright: request.keepUpright,
-        objective: request.objective,
-        maxRuns: request.maxRuns,
+        optimizeRuns: request.optimizeRuns,
       })
       finish({ type: 'done', result })
     } catch (error) {
@@ -49,47 +53,63 @@ export function createOptimizeController(store: Store): OptimizeController {
     }
   }
 
-  // An edit resets the optimize state to idle; a worker still running for the old input is stale.
-  store.subscribe((state) => {
+  function start(): void {
+    const { derived } = store.get()
+    const scenario = derived.scenario
+    if (!scenario) return
+    const request: OptimizeRequest = {
+      container: scenario.container,
+      types: scenario.types,
+      keepUpright: scenario.keepUpright,
+      optimizeRuns: DEFAULT_OPTIMIZE_RUNS,
+    }
+    store.setOptimize({
+      status: 'running',
+      runs: 0,
+      maxRuns: request.optimizeRuns,
+      containers: 0,
+      result: null,
+      error: null,
+    })
+    if (typeof Worker === 'undefined') {
+      runInline(request)
+      return
+    }
+    dispose()
+    worker = new Worker(new URL('./optimizeWorker.ts', import.meta.url), { type: 'module' })
+    worker.onmessage = ({ data }: MessageEvent<OptimizeMessage>) => finish(data)
+    worker.onerror = (event) => {
+      dispose()
+      store.setOptimize({ status: 'failed', error: event.message || 'The optimizer crashed.' })
+    }
+    worker.postMessage(request)
+  }
+
+  /** Worth a run: the inputs are settled and first fit needed more than one container. */
+  function pending(): boolean {
+    const { derived, optimize } = store.get()
+    return (
+      !derived.stale &&
+      optimize.status === 'idle' &&
+      derived.result !== null &&
+      derived.result.containers.length >= 2
+    )
+  }
+
+  // Starting from inside a store notification would nest notifications; defer by a tick.
+  const maybeStart = () => queueMicrotask(() => pending() && start())
+
+  const unsubscribe = store.subscribe((state) => {
+    // An edit resets the optimize state to idle; a worker still running for the old input is stale.
     if (state.optimize.status !== 'running' && worker) dispose()
+    if (pending()) maybeStart()
   })
+  maybeStart()
 
   return {
-    start() {
-      const { derived, optimize: current } = store.get()
-      const scenario = derived.scenario
-      if (!scenario || current.status === 'running') return
-      const request: OptimizeRequest = {
-        container: scenario.container,
-        types: scenario.types,
-        keepUpright: scenario.keepUpright,
-        objective: current.objective,
-        maxRuns: DEFAULT_MAX_RUNS,
-      }
-      store.setOptimize({
-        status: 'running',
-        runs: 0,
-        maxRuns: request.maxRuns,
-        bestKept: 0,
-        result: null,
-        error: null,
-      })
-      if (typeof Worker === 'undefined') {
-        runInline(request)
-        return
-      }
+    dispose() {
+      unsubscribe()
       dispose()
-      worker = new Worker(new URL('./optimizeWorker.ts', import.meta.url), { type: 'module' })
-      worker.onmessage = ({ data }: MessageEvent<OptimizeMessage>) => finish(data)
-      worker.onerror = (event) => {
-        dispose()
-        store.setOptimize({ status: 'failed', error: event.message || 'The optimizer crashed.' })
-      }
-      worker.postMessage(request)
-    },
-    cancel() {
-      dispose()
-      store.setOptimize({ status: 'idle', result: null, error: null })
     },
   }
 }

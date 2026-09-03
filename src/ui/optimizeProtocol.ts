@@ -1,16 +1,15 @@
-import type { BoxType, Container, Objective, OptimizeProgress, OptimizeResult } from '../core'
+import type { BoxType, Container, MultiPackProgress, MultiPackResult } from '../core'
 
 /** Message from the page to the optimize worker. */
 export interface OptimizeRequest {
   container: Container
   types: BoxType[]
   keepUpright: boolean
-  objective: Objective
-  maxRuns: number
+  optimizeRuns: number
 }
 
 /** Messages from the worker back to the page. */
 export type OptimizeMessage =
-  | { type: 'progress'; progress: OptimizeProgress }
-  | { type: 'done'; result: OptimizeResult }
+  | { type: 'progress'; progress: MultiPackProgress }
+  | { type: 'done'; result: MultiPackResult }
   | { type: 'error'; message: string }
