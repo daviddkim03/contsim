@@ -363,10 +363,20 @@ Before anything is applied, the file is parsed once to fill a dialog (`src/ui/im
 
 A workbook with Boxes and Summary sheets is the app's own export: the Boxes sheet is read as an order (with colors) and the Summary sheet restores the container type or custom size, the unit and the upright setting, so Export Excel doubles as save-and-load. "Order template" downloads a workbook with the columns, three example rows and a Guide sheet listing the rules (`ORDER_FORMAT_GUIDE`, also in README.md). Importing over a non-empty list asks for confirmation.
 
+### 5.8 Drawing a lot of boxes
+
+A container can hold hundreds of boxes, and a mesh plus a wireframe per box means thousands of objects and draw calls, which is what made orbiting stutter. Each box type is drawn as one `InstancedMesh` over a shared unit cube (the instance matrix carries position and size) plus one `LineSegments` whose buffer holds every wireframe of that type (`writeBoxEdges` in `viewerMath.ts`). A container costs a couple of draw calls per type instead of two per box, and frustum culling is off because there is nothing left to cull.
+
+Each type's boxes are sorted bottom-up when the packing is built, so the layer slider shows a prefix: moving it sets `mesh.count` and the edge draw range from a binary search (`visibleCount`), touching no buffers.
+
+The panels also stopped re-rendering on view changes that do not concern them: the legend and the placements table remember what they were drawn from and skip identical states, and the table does not build while the 3D view covers it. It caps at 500 rows and says so, pointing at the export for the rest; thousands of rows cost more to build than anyone can read.
+
+Finally the optimizer takes a wall-clock budget as well as a run count. A packer run costs a fraction of a millisecond for a few large boxes and tens of milliseconds for hundreds of small ones, so a run count alone let a dense order spend five seconds of a core on every edit.
+
 ## 6. Tech stack
 
 - TypeScript + Vite. Vanilla DOM for the UI: one `render(state)` function per panel, event delegation, a single immutable state object. If the UI grows, Preact or Svelte are fine; keep `src/core` framework-free either way.
-- three.js for the 3D view (BoxGeometry + EdgesGeometry per box, InstancedMesh only if it ever gets slow; OrbitControls from `three/addons/controls/OrbitControls.js`). The only runtime dependency.
+- three.js for the 3D view (one InstancedMesh and one merged edge buffer per box type, see 5.8; OrbitControls from `three/addons/controls/OrbitControls.js`). The only runtime dependency.
 - Vitest for unit tests of the core and the pure UI modules. Playwright (`npm run test:e2e`) drives the production build in Chromium; it was pulled forward from Phase 6 so every UI phase is verified in a real browser.
 - ESLint + Prettier. `npm run lint` and `npm test` must stay green at every commit.
 - Static deploy (GitHub Pages, Netlify, any static host). No backend, no database, no accounts. `.github/workflows/deploy.yml` runs lint, unit and e2e tests on every push and pull request and publishes to GitHub Pages from main, building with `--base /<repo>/`.
@@ -415,7 +425,7 @@ contsim/
       placementsTable.ts  placement list; the center panel until the 3D view exists
       stage.ts            center panel: toolbar (3D/Table, container toggle, layer slider, reset view)
       viewer3d.ts         three.js scene, on-demand rendering, hover dimming, layer visibility
-      viewerMath.ts       pure helpers: core-to-scene mapping, layer predicate, aspect-aware framing
+      viewerMath.ts       pure helpers: core-to-scene mapping, layer predicate and prefix count, edge buffers, aspect-aware framing
       report.ts           the Excel report: Summary, Boxes and Placements sheets from the state
       xlsx.ts             minimal SpreadsheetML writer (typed cells, header style, percent format)
       zip.ts              minimal ZIP writer (CRC-32, deflate via CompressionStream or stored)
@@ -507,8 +517,12 @@ Approximate interior dims of standard dry containers, in inches (good enough for
 
 - Packer: <= 50 ms for 300 boxes, <= 500 ms for 2,000 boxes on a laptop.
 - Live recompute: 150 ms debounce, result on screen within 100 ms after that.
-- Optimizer: <= 3 s on the example scenario, always in a worker, always cancellable.
+- Optimizer: bounded by both a run count and a wall-clock budget (DEFAULT_OPTIMIZE_MS), always in a worker.
+- 3D view: 60 fps while orbiting a container holding a thousand boxes.
+- Reacting to a view change (hover, layer, container): under a millisecond of work, whatever the box count.
 - Initial load: < 300 KB gzipped (three.js is most of it).
+
+Measured on 2026-09-08 with 900 boxes in one container, before and after section 5.8: orbiting 25 -> 119 fps, a layer-slider step 100 -> 0.3 ms, hovering a legend row 72 -> 0.1 ms, switching to the table with 2,000 placements 218 -> 55 ms, and the optimizer on a dense order 5.3 -> 1.8 s.
 
 ## 11. Later ideas (v2, only if wanted)
 

@@ -17,6 +17,7 @@ export {
 } from './optimizer'
 export {
   DEFAULT_MAX_CONTAINERS,
+  DEFAULT_OPTIMIZE_MS,
   DEFAULT_OPTIMIZE_RUNS,
   packMany,
   type MultiPackOptions,

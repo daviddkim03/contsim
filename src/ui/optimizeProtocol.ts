@@ -6,6 +6,7 @@ export interface OptimizeRequest {
   types: BoxType[]
   keepUpright: boolean
   optimizeRuns: number
+  budgetMs: number
 }
 
 /** Messages from the worker back to the page. */

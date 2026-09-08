@@ -7,7 +7,13 @@ import { exampleScenario, mixedScenario } from '../../src/scenarios'
 import { boxType, overfull, oversize, packingViolation, rotation, tiny } from './fixtures'
 
 const run = (s: Scenario, optimizeRuns = 0, maxContainers?: number) =>
-  packMany(s.container, s.types, { keepUpright: s.keepUpright, optimizeRuns, maxContainers })
+  packMany(s.container, s.types, {
+    keepUpright: s.keepUpright,
+    optimizeRuns,
+    maxContainers,
+    // Bound by runs alone, so a slow machine cannot change the answer.
+    budgetMs: Number.POSITIVE_INFINITY,
+  })
 
 /** The first invariant a multi-container result breaks, or null. */
 function multiViolation(scenario: Scenario, result: MultiPackResult): string | null {
@@ -138,6 +144,20 @@ describe('packMany', () => {
       expect(b.runs).toBe(a.runs)
       expect(b.containers.map((c) => c.placements)).toEqual(a.containers.map((c) => c.placements))
     }
+  })
+
+  it('stops optimizing when the time budget runs out, and still packs everything', () => {
+    const s = exampleScenario()
+    // Nothing fits in no time, so every container falls back to first fit.
+    const rushed = packMany(s.container, s.types, {
+      keepUpright: false,
+      optimizeRuns: 400,
+      budgetMs: 0,
+    })
+    expect(rushed.status).toBe('fits')
+    expect(rushed.stats.placed).toBe(138)
+    expect(multiViolation(s, rushed)).toBeNull()
+    expect(rushed.runs).toBeLessThan(20)
   })
 
   it('reports progress and can be told to stop optimizing, still returning a full packing', () => {

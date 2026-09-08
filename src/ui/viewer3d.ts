@@ -1,12 +1,16 @@
 import {
   AmbientLight,
   BoxGeometry,
+  BufferAttribute,
+  BufferGeometry,
   Color,
   DirectionalLight,
   EdgesGeometry,
   Group,
+  InstancedMesh,
   LineBasicMaterial,
   LineSegments,
+  Matrix4,
   Mesh,
   MeshBasicMaterial,
   MeshLambertMaterial,
@@ -20,7 +24,16 @@ import type { BoxType, Container, Placement } from '../core'
 import { query } from './dom'
 import type { Panel } from './sidebar'
 import { shownContainer, type AppState, type Store } from './state'
-import { FOV, boxCenter, boxSize, frameContainer, isBelowLayer } from './viewerMath'
+import {
+  EDGE_FLOATS_PER_BOX,
+  EDGE_VERTICES_PER_BOX,
+  FOV,
+  boxCenter,
+  boxSize,
+  frameContainer,
+  visibleCount,
+  writeBoxEdges,
+} from './viewerMath'
 
 const BACKGROUND = '#eef1f5'
 const FLOOR = '#f7f8fa'
@@ -34,11 +47,20 @@ export interface Viewer extends Panel {
   resetView(): void
 }
 
-interface BoxObject {
-  placement: Placement
-  mesh: Mesh
+/**
+ * Every box of one type, drawn in two calls: an instanced mesh for the solids
+ * and one buffer for all the wireframes. A container holding a thousand boxes
+ * costs the same as one holding ten, which per-box objects did not.
+ */
+interface TypeGroup {
+  /** Sorted bottom-up, so the layer slider shows a prefix of them. */
+  placements: Placement[]
+  mesh: InstancedMesh
   edges: LineSegments
 }
+
+/** One geometry for every box: the instance matrix carries each box's size. */
+const UNIT_BOX = new BoxGeometry(1, 1, 1)
 
 /**
  * three.js view of the packing. Renders on demand (after input, state changes
@@ -89,38 +111,13 @@ export function mountViewer(root: HTMLElement, store: Store): Viewer {
   const boxesGroup = new Group()
   scene.add(containerGroup, boxesGroup)
 
-  const geometries = new Map<string, BoxGeometry>()
-  const edgeGeometries = new Map<string, EdgesGeometry>()
   const materials = new Map<string, MeshLambertMaterial>()
   const edgeMaterials = new Map<string, LineBasicMaterial>()
-  let boxes: BoxObject[] = []
+  let groups: TypeGroup[] = []
   let lastPlacements: Placement[] | null = null
   let lastContainer: Container | null = null
-
-  function sizeKey(p: Placement): string {
-    return `${p.dx},${p.dy},${p.dz}`
-  }
-
-  function geometryFor(p: Placement): BoxGeometry {
-    const k = sizeKey(p)
-    let g = geometries.get(k)
-    if (!g) {
-      const s = boxSize(p)
-      g = new BoxGeometry(s.x, s.y, s.z)
-      geometries.set(k, g)
-    }
-    return g
-  }
-
-  function edgesFor(p: Placement): EdgesGeometry {
-    const k = sizeKey(p)
-    let g = edgeGeometries.get(k)
-    if (!g) {
-      g = new EdgesGeometry(geometryFor(p))
-      edgeGeometries.set(k, g)
-    }
-    return g
-  }
+  let lastLayer: number | null | undefined
+  const matrix = new Matrix4()
 
   function materialFor(typeId: string, color: string): MeshLambertMaterial {
     let m = materials.get(typeId)
@@ -143,6 +140,9 @@ export function mountViewer(root: HTMLElement, store: Store): Viewer {
   }
 
   function rebuildContainer(c: Container): void {
+    for (const child of containerGroup.children) {
+      if (child instanceof Mesh || child instanceof LineSegments) child.geometry.dispose()
+    }
     containerGroup.clear()
     const outline = new LineSegments(
       new EdgesGeometry(new BoxGeometry(c.l, c.h, c.w)),
@@ -176,32 +176,70 @@ export function mountViewer(root: HTMLElement, store: Store): Viewer {
     controls.update()
   }
 
+  /** One instanced mesh and one edge buffer per box type, sized for every box of that type. */
   function rebuildBoxes(placements: Placement[], types: Map<string, BoxType>): void {
+    for (const group of groups) {
+      group.mesh.dispose()
+      group.edges.geometry.dispose()
+    }
     boxesGroup.clear()
-    boxes = placements.map((placement) => {
-      const type = types.get(placement.typeId)
-      const mesh = new Mesh(
-        geometryFor(placement),
-        materialFor(placement.typeId, type?.color ?? '#888888'),
+
+    const byType = new Map<string, Placement[]>()
+    for (const p of placements) {
+      const list = byType.get(p.typeId)
+      if (list) list.push(p)
+      else byType.set(p.typeId, [p])
+    }
+
+    groups = [...byType].map(([typeId, ofType]) => {
+      // Bottom-up, so the layer slider only has to draw fewer of them.
+      ofType.sort((a, b) => a.z - b.z)
+      const mesh = new InstancedMesh(
+        UNIT_BOX,
+        materialFor(typeId, types.get(typeId)?.color ?? '#888888'),
+        ofType.length,
       )
-      const c = boxCenter(placement)
-      mesh.position.set(c.x, c.y, c.z)
-      const edges = new LineSegments(edgesFor(placement), edgeMaterialFor(placement.typeId))
-      edges.position.copy(mesh.position)
+      // A handful of draw calls, all inside the container: culling would only cost time.
+      mesh.frustumCulled = false
+
+      const positions = new Float32Array(ofType.length * EDGE_FLOATS_PER_BOX)
+      const geometry = new BufferGeometry()
+      geometry.setAttribute('position', new BufferAttribute(positions, 3))
+      const edges = new LineSegments(geometry, edgeMaterialFor(typeId))
+      edges.frustumCulled = false
+
+      ofType.forEach((p, i) => {
+        const c = boxCenter(p)
+        const s = boxSize(p)
+        matrix.makeScale(s.x, s.y, s.z)
+        matrix.setPosition(c.x, c.y, c.z)
+        mesh.setMatrixAt(i, matrix)
+        writeBoxEdges(positions, i, p)
+      })
+      mesh.instanceMatrix.needsUpdate = true
+
       boxesGroup.add(mesh, edges)
-      return { placement, mesh, edges }
+      return { placements: ofType, mesh, edges }
     })
+    lastLayer = undefined
+  }
+
+  /** Draws only the boxes at or below the layer height. */
+  function applyLayer(layer: number | null): void {
+    let visible = 0
+    for (const group of groups) {
+      const shown = visibleCount(group.placements, layer)
+      group.mesh.count = shown
+      group.edges.geometry.setDrawRange(0, shown * EDGE_VERTICES_PER_BOX)
+      visible += shown
+    }
+    lastLayer = layer
+    root.dataset.boxes = String(visible)
   }
 
   function applyView({ view }: AppState): void {
     containerGroup.visible = view.showContainer
-    let visible = 0
-    for (const b of boxes) {
-      const shown = isBelowLayer(b.placement, view.layer)
-      b.mesh.visible = shown
-      b.edges.visible = shown
-      if (shown) visible++
-    }
+    if (view.layer !== lastLayer) applyLayer(view.layer)
     for (const [typeId, m] of materials) {
       const dim = view.hoverTypeId !== null && view.hoverTypeId !== typeId
       m.transparent = dim
@@ -212,7 +250,6 @@ export function mountViewer(root: HTMLElement, store: Store): Viewer {
       const dim = view.hoverTypeId !== null && view.hoverTypeId !== typeId
       m.opacity = dim ? DIMMED_EDGE : EDGE_OPACITY
     }
-    root.dataset.boxes = String(visible)
     root.dataset.hover = view.hoverTypeId ?? ''
   }
 

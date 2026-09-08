@@ -1,4 +1,7 @@
 import { h, query, setText } from './dom'
+
+/** Rows the table will build. Beyond this the list is for the export, not the screen. */
+const MAX_ROWS = 500
 import type { Panel } from './sidebar'
 import { shownResult, type AppState, type Store } from './state'
 import { formatNumber } from './units'
@@ -27,11 +30,28 @@ export function mountPlacementsTable(root: HTMLElement, store: Store): Panel {
   const tbody = query<HTMLTableSectionElement>(root, 'tbody')
   const empty = query<HTMLElement>(root, '.empty')
 
+  /** What the rows on screen were built from. A big table is not worth rebuilding twice. */
+  let shown: { result: unknown; scenario: unknown; scale: number; unit: string } | null = null
+
   return {
     render(state: AppState) {
       const { draft, derived } = state
       const { scenario, scale } = derived
       const result = shownResult(state)
+      const next = { result, scenario, scale, unit: draft.unit }
+      const same =
+        shown !== null &&
+        shown.result === next.result &&
+        shown.scenario === next.scenario &&
+        shown.scale === next.scale &&
+        shown.unit === next.unit
+      // Hidden behind the 3D view: build it when it is next looked at.
+      if (root.hidden) {
+        if (!same) shown = null
+        return
+      }
+      if (same) return
+      shown = next
       if (!result || !scenario) {
         tbody.replaceChildren()
         empty.hidden = false
@@ -40,8 +60,12 @@ export function mountPlacementsTable(root: HTMLElement, store: Store): Panel {
       }
       const types = new Map(scenario.types.map((t) => [t.id, t]))
       const n = (v: number) => formatNumber(v, scale)
+      const total = result.stats.placed
+      // Thousands of rows cost more to build than anyone can read; the export has them all.
+      let left = MAX_ROWS
       const rows = result.containers.flatMap((c, k) =>
-        c.placements.map((p, i) => {
+        c.placements.slice(0, Math.max(0, left)).map((p, i) => {
+          left--
           const type = types.get(p.typeId)
           const swatch = h('span', { class: 'swatch' })
           swatch.style.background = type?.color ?? '#888888'
@@ -59,10 +83,12 @@ export function mountPlacementsTable(root: HTMLElement, store: Store): Panel {
       tbody.replaceChildren(...rows)
       empty.hidden = rows.length > 0
       const containers = result.containers.length
+      const shownRows = rows.length < total ? `${rows.length} of ${total}` : String(total)
       setText(
         summary,
         rows.length > 0
-          ? `${rows.length} placed in ${containers} ${containers === 1 ? 'container' : 'containers'}, positions in ${draft.unit} from the back-bottom-left corner`
+          ? `${shownRows} placed in ${containers} ${containers === 1 ? 'container' : 'containers'}, positions in ${draft.unit} from the back-bottom-left corner` +
+              (rows.length < total ? '. Export Excel for the full list' : '')
           : '',
       )
     },

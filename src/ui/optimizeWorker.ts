@@ -9,6 +9,7 @@ self.onmessage = ({ data }: MessageEvent<OptimizeRequest>) => {
     const result = packMany(data.container, data.types, {
       keepUpright: data.keepUpright,
       optimizeRuns: data.optimizeRuns,
+      budgetMs: data.budgetMs,
       onProgress: (progress) => {
         // A run takes a few milliseconds; every fifth is plenty for a progress line.
         if (progress.runs - reported >= 5) {

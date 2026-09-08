@@ -194,8 +194,35 @@ export function mountLegend(root: HTMLElement, store: Store): Panel {
     legendList.hidden = rows.length === 0
   }
 
+  /** The state the panel was drawn from; hovering a row changes none of it. */
+  let shown: {
+    draft: unknown
+    derived: unknown
+    result: unknown
+    index: number
+    optimize: unknown
+  } | null = null
+
   return {
     render(state: AppState) {
+      const next = {
+        draft: state.draft,
+        derived: state.derived,
+        result: shownResult(state),
+        index: shownContainer(state).index,
+        optimize: state.optimize,
+      }
+      if (
+        shown !== null &&
+        shown.draft === next.draft &&
+        shown.derived === next.derived &&
+        shown.result === next.result &&
+        shown.index === next.index &&
+        shown.optimize === next.optimize
+      ) {
+        return
+      }
+      shown = next
       renderStatus(state)
       renderContainers(state)
       renderLegend(state)

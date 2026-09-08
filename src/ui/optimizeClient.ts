@@ -1,4 +1,4 @@
-import { DEFAULT_OPTIMIZE_RUNS, packMany } from '../core'
+import { DEFAULT_OPTIMIZE_MS, DEFAULT_OPTIMIZE_RUNS, packMany } from '../core'
 import type { OptimizeMessage, OptimizeRequest } from './optimizeProtocol'
 import type { Store } from './state'
 
@@ -46,6 +46,7 @@ export function startAutoOptimizer(store: Store): AutoOptimizer {
       const result = packMany(request.container, request.types, {
         keepUpright: request.keepUpright,
         optimizeRuns: request.optimizeRuns,
+        budgetMs: request.budgetMs,
       })
       finish({ type: 'done', result })
     } catch (error) {
@@ -62,6 +63,7 @@ export function startAutoOptimizer(store: Store): AutoOptimizer {
       types: scenario.types,
       keepUpright: scenario.keepUpright,
       optimizeRuns: DEFAULT_OPTIMIZE_RUNS,
+      budgetMs: DEFAULT_OPTIMIZE_MS,
     }
     store.setOptimize({
       status: 'running',

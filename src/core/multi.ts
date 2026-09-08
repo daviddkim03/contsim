@@ -68,12 +68,22 @@ export interface MultiPackOptions {
    * packs every container once, first fit; that takes a few milliseconds.
    */
   optimizeRuns?: number
+  /**
+   * Wall-clock budget for the optimizing, in milliseconds. A run costs
+   * anything from a fraction of a millisecond to tens of them depending on
+   * how many boxes share a container, so the run count alone is a poor
+   * bound. Past the budget the remaining containers are packed first fit.
+   * Default DEFAULT_OPTIMIZE_MS; pass Infinity to bound by runs alone.
+   */
+  budgetMs?: number
   /** Called after every optimizer run. Return false to finish without further optimizing. */
   onProgress?: (progress: MultiPackProgress) => boolean | void
 }
 
 export const DEFAULT_MAX_CONTAINERS = 50
 export const DEFAULT_OPTIMIZE_RUNS = 400
+/** Long enough to improve a load, short enough to leave the machine alone. */
+export const DEFAULT_OPTIMIZE_MS = 1500
 
 type Quantities = Record<string, number>
 
@@ -102,6 +112,7 @@ export function packMany(
   }
   const maxContainers = options.maxContainers ?? DEFAULT_MAX_CONTAINERS
   const maxRuns = options.optimizeRuns ?? 0
+  const budgetMs = options.budgetMs ?? DEFAULT_OPTIMIZE_MS
   const requested = types.reduce((n, t) => n + t.qty, 0)
   const containerVolume = volume(container)
 
@@ -151,6 +162,7 @@ export function packMany(
         maxRuns: maxRuns - runs,
         onProgress: (p) => {
           runs = before + p.runs
+          if (performance.now() - start > budgetMs) optimizing = false
           if (!report()) optimizing = false
           return optimizing
         },
