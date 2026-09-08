@@ -1,3 +1,5 @@
+import { formatCatalogDims } from './catalogSearch'
+import { findCatalogItem } from './catalogStore'
 import { h, query, setText } from './dom'
 import { summarizeStatus } from './describe'
 import { shownContainer, shownResult, type AppState, type Store } from './state'
@@ -157,13 +159,18 @@ export function mountLegend(root: HTMLElement, store: Store): Panel {
       const row = h('li', { class: 'legend-row', 'data-id': type.id })
       const swatch = h('span', { class: 'swatch' })
       swatch.style.background = type.color
+      // While another row is being fixed there is no scenario, so fall back to
+      // the catalog and to whatever the row itself holds.
+      const item = type.kind === 'catalog' ? findCatalogItem(type.catalogCode) : null
       const dims = coreType
         ? `${formatNumber(coreType.dims.l, scale)} × ${formatNumber(coreType.dims.w, scale)} × ${formatNumber(coreType.dims.h, scale)} ${draft.unit}`
-        : type.kind === 'catalog'
-          ? type.catalogCode
-            ? 'Not in the catalog'
-            : 'No cabinet picked yet'
-          : `${type.l || '?'} × ${type.w || '?'} × ${type.h || '?'} ${draft.unit}`
+        : item
+          ? formatCatalogDims(item, draft.unit)
+          : type.kind === 'catalog'
+            ? type.catalogCode
+              ? 'Not in the catalog'
+              : 'No cabinet picked yet'
+            : `${type.l || '?'} × ${type.w || '?'} × ${type.h || '?'} ${draft.unit}`
       const count =
         placed !== null && requested !== null ? `${placed} / ${requested}` : type.qty || '?'
       if (placed !== null && requested !== null && placed < requested) row.classList.add('short')

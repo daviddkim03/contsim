@@ -12,6 +12,19 @@ export const MAX_DECIMALS = 3
 
 const NUMBER = /^\s*(\d*)(?:\.(\d*))?\s*$/
 
+const MM_PER_UNIT: Record<Unit, number> = { in: 25.4, ft: 304.8, cm: 10, mm: 1, m: 1000 }
+
+/**
+ * Converts a real-world length between units, rounded to the precision the
+ * core keeps (MAX_DECIMALS). Every size the user can see or type is a real
+ * measurement, so it converts: catalog sizes, container presets, typed
+ * dimensions and imported ones alike.
+ */
+export function convertLength(value: number, from: Unit, to: Unit): number {
+  if (from === to) return value
+  return Number(((value * MM_PER_UNIT[from]) / MM_PER_UNIT[to]).toFixed(MAX_DECIMALS))
+}
+
 /** Parses a non-negative decimal typed by the user ("12", "12.5", ".5"). Null for anything else. */
 export function parseLength(text: string): number | null {
   const m = NUMBER.exec(text)

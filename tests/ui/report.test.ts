@@ -30,7 +30,7 @@ describe('formatTimestamp', () => {
 
 describe('buildReport', () => {
   it('returns null while the inputs are invalid', () => {
-    const draft = edits.setTypeField(exampleDraft(), '36', 'qty', 'abc')
+    const draft = edits.setTypeField(exampleDraft(), '18', 'qty', 'abc')
     expect(buildReport(stateOf(draft))).toBeNull()
   })
 
@@ -49,7 +49,7 @@ describe('buildReport', () => {
     expect(summaryOf(summary!.rows)).toMatchObject({
       Exported: '2026-09-02 14:05',
       Status: `${result.containers.length} containers`,
-      Details: expect.stringContaining('All 150 boxes placed in'),
+      Details: expect.stringContaining('All 140 boxes placed in'),
       Unit: 'in',
       'Container type': '20 ft',
       'Container length (in)': 232.2,
@@ -57,8 +57,8 @@ describe('buildReport', () => {
       'Container height (in)': 94.2,
       'Keep boxes upright': 'No',
       'Containers needed': result.containers.length,
-      'Boxes requested': 150,
-      'Boxes placed': 150,
+      'Boxes requested': 140,
+      'Boxes placed': 140,
       'Boxes left out': 0,
       'Fill, all containers': { percent: result.stats.fill },
       'Placements sheet': expect.stringContaining('Lengths are in inches.'),
@@ -95,13 +95,13 @@ describe('buildReport', () => {
   it('lists every box type with requested, placed and left-out counts', () => {
     const state = stateOf(exampleDraft())
     const boxes = buildReport(state, now)!.sheets[2]!.rows
-    expect(boxes).toHaveLength(10)
-    // A 36 in base cabinet: 36 x 24 x 34.5 in = 29,808 cu in = 17.25 cu ft.
-    expect(boxes[0]!.slice(0, 9)).toEqual([1, '36', '#f59e0b', 36, 24, 34.5, 20, 20, 0])
-    expect(boxes[0]![9]).toBe(17.25)
+    expect(boxes).toHaveLength(5)
+    // An 18 in base cabinet: 18 x 24 x 34.5 in = 14,904 cu in = 8.625 cu ft, shown to two decimals.
+    expect(boxes[0]!.slice(0, 9)).toEqual([1, '18', '#f59e0b', 18, 24, 34.5, 28, 28, 0])
+    expect(boxes[0]![9]).toBe(8.63)
     const sum = (column: number) => boxes.reduce((n, row) => n + (row[column] as number), 0)
-    expect(sum(6)).toBe(150)
-    expect(sum(7)).toBe(150)
+    expect(sum(6)).toBe(140)
+    expect(sum(7)).toBe(140)
     expect(sum(8)).toBe(0)
     const shares = boxes.map((row) => (row[11] as { percent: number }).percent)
     expect(shares.reduce((a, b) => a + b)).toBeCloseTo(state.derived.result!.stats.fill, 6)
@@ -111,7 +111,7 @@ describe('buildReport', () => {
     const state = stateOf(exampleDraft())
     const result = state.derived.result!
     const placements = buildReport(state, now)!.sheets[3]!.rows
-    expect(placements).toHaveLength(150)
+    expect(placements).toHaveLength(140)
     expect(placements[0]!.slice(0, 5)).toEqual([1, 1, 'P249624', 0, 0])
     const perContainer = result.containers.map((c) => c.placements.length)
     placements.forEach((row, i) => {
@@ -158,6 +158,6 @@ describe('buildReport', () => {
       optimized.containers.length,
     )
     expect(workbook.sheets[1]!.rows).toHaveLength(optimized.containers.length)
-    expect(workbook.sheets[3]!.rows).toHaveLength(150)
+    expect(workbook.sheets[3]!.rows).toHaveLength(140)
   })
 })

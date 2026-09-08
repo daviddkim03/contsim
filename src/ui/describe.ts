@@ -75,9 +75,8 @@ export function summarizeStatus(
     for (const t of oversize.slice(0, MAX_LISTED_TYPES)) {
       lines.push(`${t.name}: ${boxes(result.unplaced[t.id]!)} cannot ship in this container`)
     }
-    if (oversize.length > MAX_LISTED_TYPES) {
-      lines.push(`and ${oversize.length - MAX_LISTED_TYPES} more box types`)
-    }
+    const rest = oversize.length - MAX_LISTED_TYPES
+    if (rest > 0) lines.push(`and ${rest} more box ${rest === 1 ? 'type' : 'types'}`)
     if (placed > 0) {
       lines.push(`Everything else fits in ${describeContainers(draft, containers)}.`)
     }

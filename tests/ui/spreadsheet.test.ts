@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { CATALOG } from '../../src/catalog'
 import {
   decodeXml,
   parseCsv,
@@ -66,11 +67,19 @@ describe('readWorkbook', () => {
   })
 
   it('reads a workbook saved by Excel, shared strings included', async () => {
-    const rows = await readFirstSheet(new Uint8Array(readFileSync('data/catalog.xlsx')))
+    // Written by Excel, so its text lives in a shared string table, unlike ours.
+    const bytes = new Uint8Array(readFileSync('tests/fixtures/excel-workbook.xlsx'))
+    const rows = await readFirstSheet(bytes)
     expect(rows[0]).toEqual(['TYPE', 'W', 'D', 'H', 'W', 'D', 'H'])
     expect(rows[1]!.slice(0, 4)).toEqual([9, 9, 24, 34.5])
     expect(rows).toHaveLength(175)
     expect(rows[174]![0]).toBe('P368424')
+  })
+
+  it('reads the catalog the app ships with', async () => {
+    const rows = await readFirstSheet(new Uint8Array(readFileSync('data/catalog.xlsx')))
+    expect(rows[0]).toEqual(['TYPE', 'W', 'D', 'H'])
+    expect(rows.slice(1).map((r) => r[0])).toEqual(CATALOG.map((c) => c.code))
   })
 
   it('rejects files that are not workbooks', async () => {

@@ -11,6 +11,8 @@ export interface ComboboxOption {
   id: string
   label: string
   detail?: string
+  /** Small marker after the label, e.g. "yours" for a saved catalog item. */
+  tag?: string
   /** Rendered apart from the matches, e.g. "Custom size...". */
   action?: boolean
 }
@@ -110,6 +112,7 @@ export function attachCombobox(input: HTMLInputElement, handlers: ComboboxHandle
           },
           [
             h('span', { class: 'option-label', text: option.label }),
+            ...(option.tag ? [h('span', { class: 'option-tag', text: option.tag })] : []),
             ...(option.detail ? [h('span', { class: 'option-detail', text: option.detail })] : []),
           ],
         ),

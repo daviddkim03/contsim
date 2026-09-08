@@ -22,6 +22,8 @@ Added on 2026-09-02: Export Excel (a dependency-free .xlsx writer, section 5.4) 
 
 Added on 2026-09-03: container presets and a cabinet catalog with a searchable picker (section 5.5), and packing into as many containers as the order needs with automatic background optimization (sections 4.4 and 5.6). The Optimize button, its objectives and the Apply / Discard popover are gone; the optimizer's job is now to fill each container as densely as possible. Later the same day: Excel import of an order, with a template and a guide, replacing JSON import and export (section 5.7); the Excel export imports back.
 
+Added on 2026-09-08: the import asks which unit the file's sizes are in and switching units converts every size (sections 2 and 5.7); a custom box can be saved into the catalog and taken back out (section 5.5); the shipped catalog is five placeholders instead of the 174 sample rows, since the real one is loaded from a spreadsheet or built up in the app.
+
 ## 1. Goals and non-goals
 
 Goals (v1):
@@ -52,7 +54,7 @@ Non-goals (v1) - deliberately out of scope to keep it small:
   - `impossible`: proven by a quick check (volume, oversize box, per-type upper bound). Comes with a reason.
   - `not-found`: the heuristic could not place everything. It might still be possible. The UI must say so.
 
-Units: the core is unit-agnostic. The UI has a unit label (in, ft, cm, mm, m) that only affects labels and the volume readout.
+Units: the core is unit-agnostic. The UI has a unit (in, ft, cm, mm, m) that every length is expressed in; changing it converts them all (`convertLength` in `src/ui/units.ts`), so a size always means the same measurement. Until 2026-09-08 the unit was only a label and typed numbers kept their value, which stopped making sense once catalog and preset sizes converted around them.
 
 Numeric precision: convert all dims to integers at the UI boundary (multiply by 10^p, where p = max number of decimals across all inputs, capped at 3). The core does integer math only, so comparisons are exact. This avoids the classic float bug where 0.1 + 0.2 pushes a box 1e-17 past the wall and the app says "doesn't fit". Positions and extents never exceed a container dimension, so they stay exact; volumes are only used for the volume check and the fill ratio, where float rounding is harmless. The core accepts dims up to 10^7 units and quantities up to 10,000 per type; `validateScenario` in `src/core/validate.ts` reports every issue it finds so the UI can flag each field.
 
@@ -341,7 +343,11 @@ The writer is in-house (`src/ui/xlsx.ts` + `src/ui/zip.ts`, about 300 lines): Sp
 
 The container is chosen from a dropdown of standard dry containers (10 ft, 20 ft, 20 ft high cube, 40 ft, 40 ft high cube, 45 ft high cube) whose typical interior sizes are kept in millimetres (`src/ui/presets.ts`) and converted to the display unit with sensible decimals; the L / W / H fields show the numbers and are locked. "Custom size" unlocks them, starting from the preset's numbers, and the custom values survive switching back and forth.
 
-Box rows pick from the cabinet catalog (`data/catalog.xlsx` -> `npm run catalog` -> `src/catalog.ts`, 174 codes with W x D x H in inches). The row's text input is a combobox (`src/ui/combobox.ts`): typing filters by code (exact, prefix, substring) or by size in the display unit or inches, sizes typed in W x D x H order rank first, and "Custom size" at the end of the list turns the row into a custom box named after the typed text with editable dimensions. Width runs along the container's length, depth along its width, height is up. Rows saved before the catalog existed load as custom boxes.
+Box rows pick from the cabinet catalog. It has two parts (`src/ui/catalogStore.ts`): the built-in items (`data/catalog.xlsx` -> `npm run catalog` -> `src/catalog.ts`, W x D x H in inches; the app ships five placeholders) and the items the user saved, which live in localStorage under `contsim.catalog.v1`. Codes match regardless of case and spaces, and a saved code cannot shadow a built-in one.
+
+The row's text input is a combobox (`src/ui/combobox.ts`): typing filters by code (exact, prefix, substring) or by size in the display unit or inches, sizes typed in W x D x H order rank first, saved items are marked "saved", and "Custom size" at the end of the list turns the row into a custom box named after the typed text with editable dimensions. Width runs along the container's length, depth along its width, height is up. Rows saved before the catalog existed load as custom boxes.
+
+The star on a custom row saves it into the catalog under its name (converted to inches), which turns the row into a catalog row; the star on a saved cabinet takes it back out and returns every row using it to a custom box with the same size. A name that is taken, or a box without a size, is refused with a message.
 
 ### 5.6 Many containers and automatic optimization
 
@@ -352,6 +358,8 @@ Whenever a fresh first-fit result needs more than one container, `src/ui/optimiz
 ### 5.7 Importing an order
 
 Import (in the Boxes panel) accepts an .xlsx or .csv file. `src/ui/spreadsheet.ts` reads workbooks without a library: the ZIP is inflated with the browser's DecompressionStream, worksheets are parsed with regular expressions (shared strings, inline strings, formula results, booleans, errors), and CSV is split on the delimiter used in the first line with quoted fields. `src/ui/orderImport.ts` finds the header row (within the first 20 rows) by its column words, case, punctuation and units aside: Code (Type, Item, SKU, Name, Box), Qty (Quantity, Count, Pcs, Requested), Width / Depth / Height (W / D / H; Length and Width side by side mean first and second size, the app's own naming), and Color. Catalog codes are matched ignoring case and spaces and take their size from the catalog; other codes need all three sizes and become custom boxes; duplicate codes add up; every skipped row gets a one-line reason shown under the buttons. Sizes convert from the unit named in the header into the app's unit.
+
+Before anything is applied, the file is parsed once to fill a dialog (`src/ui/importDialog.ts`) that shows what was found, how many rows will be skipped and what the import replaces, and asks which unit the file's sizes are in: a spreadsheet rarely says, and the answer changes what every number means. The chosen unit becomes the app's unit, so the numbers on screen match the numbers in the file. A column header that names its own unit keeps it, and a workbook saved by contsim states its unit in the Summary sheet, so it is not asked about. Confirming parses the file again in that unit and applies it.
 
 A workbook with Boxes and Summary sheets is the app's own export: the Boxes sheet is read as an order (with colors) and the Summary sheet restores the container type or custom size, the unit and the upright setting, so Export Excel doubles as save-and-load. "Order template" downloads a workbook with the columns, three example rows and a Guide sheet listing the rules (`ORDER_FORMAT_GUIDE`, also in README.md). Importing over a non-empty list asks for confirmation.
 
@@ -394,11 +402,13 @@ contsim/
       dom.ts              tiny DOM helpers (h, setValue, setInvalid, download)
       describe.ts         status wording shared by the status panel and the report
       presets.ts          standard container interiors and unit conversion (5.5)
-      catalogSearch.ts    catalog lookup, unit conversion and search ranking (5.5)
+      catalogStore.ts     built-in plus saved catalog items, persisted (5.5)
+      catalogSearch.ts    catalog unit conversion and search ranking (5.5)
       combobox.ts         searchable dropdown used by the box rows (5.5)
       example.ts          the order the app opens with
       spreadsheet.ts      reads .xlsx (ZIP + SpreadsheetML) and .csv into rows (5.7)
       orderImport.ts      rows -> box rows, the export round trip, the order template (5.7)
+      importDialog.ts     asks what the file holds and which unit it uses (5.7)
       palette.ts          box type colors
       sidebar.ts          container preset and size, box rows with the catalog picker, export
       legend.ts           status panel, container list (selector) and legend
@@ -414,13 +424,15 @@ contsim/
       optimizeClient.ts   watches the store and runs the worker whenever more than one container is needed
       palette.ts
     main.ts
-  data/catalog.xlsx       the cabinet catalog as delivered (TYPE, W, D, H)
+  data/catalog.xlsx       the cabinet catalog (TYPE, W, D, H); five placeholders as shipped
   scripts/import-catalog.ts  regenerates src/catalog.ts from it
+  scripts/make-placeholder-catalog.ts  writes the five-row starter spreadsheet back
   tests/
     core/                 geometry, feasibility, validate, ordering, packer, optimizer, multi tests
     ui/                   units and state tests
     e2e/                  Playwright smoke tests against the production build (npm run test:e2e)
     helpers/              independent ZIP and worksheet readers used to verify exports
+    fixtures/             a workbook written by Excel, to test the reader against the real thing
     core/fixtures.ts      synthetic scenarios (tiny, rotation, pinwheel, perf300) and packingViolation()
 ```
 

@@ -7,11 +7,12 @@ import {
   type PackResult,
   type Scenario,
 } from '../core'
-import { catalogTexts, findCatalogItem } from './catalogSearch'
+import { catalogTexts } from './catalogSearch'
+import { findCatalogItem } from './catalogStore'
 import { exampleDraft } from './example'
 import { nextColor } from './palette'
 import { CONTAINER_TYPES, presetFor, presetTexts, type ContainerType } from './presets'
-import { UNITS, parseCount, parseLength, scaleFor, toInt, type Unit } from './units'
+import { UNITS, convertLength, parseCount, parseLength, scaleFor, toInt, type Unit } from './units'
 
 export type BoxKind = 'catalog' | 'custom'
 
@@ -35,11 +36,12 @@ export const BOX_KINDS: readonly BoxKind[] = ['catalog', 'custom']
 /** What an imported spreadsheet contributes: box rows, and container settings when the file has them. */
 export interface ScenarioImport {
   types: BoxTypeDraft[]
+  /** The unit the sizes above are in; it becomes the app's unit. */
+  unit: Unit
   container: {
     containerType: ContainerType
     /** Custom interior size in `unit`; null when the file names a preset. */
     container: { l: string; w: string; h: string } | null
-    unit: Unit
     keepUpright: boolean
   } | null
 }
@@ -285,8 +287,31 @@ export const edits = {
     const container = containerType === 'custom' ? containerTexts(draft) : draft.container
     return { ...draft, containerType, container }
   },
+  /**
+   * Switches the display unit. Every size is a real measurement, so typed
+   * numbers convert; catalog rows are recomputed from the catalog, which is
+   * exact.
+   */
   setUnit(draft: Draft, unit: Unit): Draft {
-    return { ...draft, unit }
+    if (unit === draft.unit) return draft
+    const convert = (text: string): string => {
+      const value = parseLength(text)
+      return value === null ? text : String(convertLength(value, draft.unit, unit))
+    }
+    return {
+      ...draft,
+      unit,
+      container: {
+        l: convert(draft.container.l),
+        w: convert(draft.container.w),
+        h: convert(draft.container.h),
+      },
+      types: draft.types.map((t) => {
+        const item = t.kind === 'catalog' ? findCatalogItem(t.catalogCode) : null
+        if (item) return { ...t, ...catalogTexts(item, unit) }
+        return { ...t, l: convert(t.l), w: convert(t.w), h: convert(t.h) }
+      }),
+    }
   },
   setKeepUpright(draft: Draft, keepUpright: boolean): Draft {
     return { ...draft, keepUpright }
@@ -314,6 +339,17 @@ export const edits = {
       ...draft,
       types: draft.types.map((t) =>
         t.id === id ? { ...t, kind: 'catalog', catalogCode: code, name: code, ...texts } : t,
+      ),
+    }
+  },
+  /** Turns every row that uses `code` back into a custom box, keeping the size it had. */
+  unsetCatalogItem(draft: Draft, code: string): Draft {
+    return {
+      ...draft,
+      types: draft.types.map((t) =>
+        t.kind === 'catalog' && t.catalogCode === code
+          ? { ...t, kind: 'custom', catalogCode: '', name: t.name.trim() || code }
+          : t,
       ),
     }
   },
@@ -345,17 +381,20 @@ export const edits = {
       }),
     }
   },
-  /** Replaces the box list with an import, and the container settings when the file carried them. */
+  /**
+   * Replaces the box list with an import and switches to the file's unit
+   * (which converts the container the import does not carry).
+   */
   applyImport(draft: Draft, imported: ScenarioImport): Draft {
+    const converted = edits.setUnit(draft, imported.unit)
     const c = imported.container
     return {
-      ...draft,
+      ...converted,
       types: imported.types,
       ...(c
         ? {
             containerType: c.containerType,
-            container: c.container ?? draft.container,
-            unit: c.unit,
+            container: c.container ?? converted.container,
             keepUpright: c.keepUpright,
           }
         : {}),

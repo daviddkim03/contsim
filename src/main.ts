@@ -1,4 +1,5 @@
 import './style.css'
+import { initCatalog } from './ui/catalogStore'
 import { mountLegend } from './ui/legend'
 import { mountStage } from './ui/stage'
 import { startAutoOptimizer } from './ui/optimizeClient'
@@ -24,6 +25,9 @@ const storage = (() => {
     return null
   }
 })()
+
+// The saved catalog items must be in place before the first packing is derived.
+initCatalog(storage)
 
 const store = new Store(loadDraft(storage), storage)
 startAutoOptimizer(store)

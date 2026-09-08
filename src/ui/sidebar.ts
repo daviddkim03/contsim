@@ -1,6 +1,13 @@
-import { findCatalogItem, formatCatalogDims, searchCatalog } from './catalogSearch'
+import { formatCatalogDims, searchCatalog } from './catalogSearch'
+import {
+  addUserCatalogItem,
+  findCatalogItem,
+  isUserCatalogItem,
+  removeUserCatalogItem,
+} from './catalogStore'
 import { attachCombobox } from './combobox'
 import { download, h, query, setInvalid, setValue, setText } from './dom'
+import { promptImport } from './importDialog'
 import { wireHover } from './legend'
 import {
   importOrder,
@@ -23,7 +30,7 @@ import {
   type Store,
   type TypeField,
 } from './state'
-import { UNITS, type Unit } from './units'
+import { UNITS, convertLength, parseLength, type Unit } from './units'
 import { writeXlsx, XLSX_MIME } from './xlsx'
 
 export interface Panel {
@@ -159,6 +166,9 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
       case 'remove':
         if (id) store.edit((d) => edits.removeType(d, id))
         break
+      case 'toggle-catalog':
+        if (id) toggleCatalog(id)
+        break
       case 'inc':
         if (id) store.edit((d) => edits.stepQty(d, id, 1))
         break
@@ -195,6 +205,36 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
     download(new Blob([await writeXlsx(workbook)], { type: XLSX_MIME }), EXCEL_FILENAME)
   }
 
+  /** Saves a custom row to the catalog, or takes a saved cabinet back out of it. */
+  function toggleCatalog(id: string): void {
+    const { draft } = store.get()
+    const type = draft.types.find((t) => t.id === id)
+    if (!type) return
+    if (type.kind === 'catalog') {
+      if (!removeUserCatalogItem(type.catalogCode)) return
+      store.edit((d) => edits.unsetCatalogItem(d, type.catalogCode))
+      showNotice(`${type.catalogCode} is no longer in the catalog.`, false)
+      return
+    }
+    const sides = [type.l, type.w, type.h].map(parseLength)
+    if (!sides.every((v): v is number => v !== null && v > 0)) {
+      showNotice('Give the box a size before saving it to the catalog.', true)
+      return
+    }
+    const [l, w, h] = sides.map((v) => convertLength(v, draft.unit, 'in')) as [
+      number,
+      number,
+      number,
+    ]
+    const result = addUserCatalogItem(type.name, { w: l, d: w, h })
+    if (!result.ok) {
+      showNotice(result.error, true)
+      return
+    }
+    store.edit((d) => edits.setCatalogItem(d, id, result.item.code))
+    showNotice(`${result.item.code} saved to the catalog.`, false)
+  }
+
   async function downloadTemplate(): Promise<void> {
     const workbook = orderTemplate(store.get().draft.unit)
     download(new Blob([await writeXlsx(workbook)], { type: XLSX_MIME }), ORDER_TEMPLATE_FILENAME)
@@ -209,29 +249,51 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
   async function importFile(file: File | undefined): Promise<void> {
     if (!file) return
     const { draft } = store.get()
-    let parsed: ImportParse
+    const read = (unit: Unit): ImportParse => {
+      try {
+        return sheets
+          ? importWorkbook(sheets, unit, draft.types)
+          : importOrder(rows!, unit, draft.types)
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) }
+      }
+    }
+    let sheets: Awaited<ReturnType<typeof readWorkbook>> | null = null
+    let rows: ReturnType<typeof parseCsv> | null = null
     try {
       const bytes = new Uint8Array(await file.arrayBuffer())
       const isWorkbook = /\.xlsx$/i.test(file.name) || (bytes[0] === 0x50 && bytes[1] === 0x4b)
-      parsed = isWorkbook
-        ? importWorkbook(await readWorkbook(bytes), draft.unit, draft.types)
-        : importOrder(parseCsv(new TextDecoder().decode(bytes)), draft.unit, draft.types)
+      if (isWorkbook) sheets = await readWorkbook(bytes)
+      else rows = parseCsv(new TextDecoder().decode(bytes))
     } catch (error) {
-      parsed = { ok: false, error: error instanceof Error ? error.message : String(error) }
+      showNotice(`${file.name}: ${error instanceof Error ? error.message : String(error)}`, true)
+      return
     }
+
+    // Read once to see what is in the file, then again in the unit the user picks.
+    const preview = read(draft.unit)
+    if (!preview.ok) {
+      showNotice(`${file.name}: ${preview.error}`, true)
+      return
+    }
+    // A workbook saved by contsim names its own unit; anything else is asked about.
+    const stated = preview.imported.container ? preview.imported.unit : null
+    const unit = await promptImport({
+      fileName: file.name,
+      rows: preview.imported.types.length,
+      boxes: preview.imported.boxes,
+      skipped: preview.imported.skipped,
+      replaces: draft.types.length,
+      unit: stated ?? preview.imported.detectedUnit ?? draft.unit,
+      askUnit: stated === null,
+    })
+    if (!unit) return
+    const parsed = unit === preview.imported.unit ? preview : read(unit)
     if (!parsed.ok) {
       showNotice(`${file.name}: ${parsed.error}`, true)
       return
     }
-    const { imported } = parsed
-    if (
-      draft.types.length > 0 &&
-      !window.confirm(
-        `Replace the current ${draft.types.length} box rows with the ${imported.types.length} rows from ${file.name}?`,
-      )
-    ) {
-      return
-    }
+    const imported = { ...parsed.imported, unit: stated ?? unit }
     store.edit((d) => edits.applyImport(d, imported))
     const shown = imported.notes.slice(0, 3).join('. ')
     const more = imported.notes.length > 3 ? ` (+${imported.notes.length - 3} more)` : ''
@@ -248,7 +310,10 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
       <div class="row-top">
         <span class="swatch"></span>
         <input class="name" data-field="search" placeholder="Search by code or size" autocomplete="off" aria-label="Box type">
-        <button type="button" class="icon" data-action="remove" aria-label="Remove box" title="Remove box">×</button>
+        <span class="row-buttons">
+          <button type="button" class="icon star" data-action="toggle-catalog" hidden></button>
+          <button type="button" class="icon" data-action="remove" aria-label="Remove box" title="Remove box">×</button>
+        </span>
       </div>
       <div class="row-bottom">
         <span class="row-dims" data-role="dims"></span>
@@ -283,6 +348,7 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
             ...items.map((item) => ({
               id: item.code,
               label: item.code,
+              tag: isUserCatalogItem(item.code) ? 'saved' : undefined,
               detail: formatCatalogDims(item, unit),
             })),
             {
@@ -326,6 +392,15 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
   ): void {
     row.dataset.kind = type.kind
     query<HTMLElement>(row, '.swatch').style.background = type.color
+    const saved = type.kind === 'catalog' && isUserCatalogItem(type.catalogCode)
+    const star = query<HTMLButtonElement>(row, '[data-action="toggle-catalog"]')
+    star.hidden = type.kind !== 'custom' && !saved
+    star.textContent = saved ? '★' : '☆'
+    star.classList.toggle('on', saved)
+    const starTitle = saved ? 'Remove from the catalog' : 'Save to the catalog'
+    star.title = starTitle
+    star.setAttribute('aria-label', starTitle)
+    star.setAttribute('aria-pressed', saved ? 'true' : 'false')
     const search = query<HTMLInputElement>(row, '[data-field="search"]')
     // While the user is typing a search, the text is theirs, not the store's.
     if (document.activeElement !== search) {

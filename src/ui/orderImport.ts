@@ -7,13 +7,14 @@
  *   its Summary sheet restores the container, unit and upright setting.
  */
 
-import { CATALOG, type CatalogItem } from '../catalog'
+import type { CatalogItem } from '../catalog'
 import { catalogTexts } from './catalogSearch'
+import { findCatalogItem } from './catalogStore'
 import { nextColor } from './palette'
 import { CONTAINER_PRESETS } from './presets'
 import type { CellValue, Row, SheetRows } from './spreadsheet'
 import { newTypeId, type BoxTypeDraft, type ScenarioImport } from './state'
-import { UNITS, type Unit } from './units'
+import { UNITS, convertLength, type Unit } from './units'
 import type { Workbook } from './xlsx'
 
 export const ORDER_TEMPLATE_FILENAME = 'contsim-order-template.xlsx'
@@ -21,7 +22,7 @@ export const ORDER_TEMPLATE_FILENAME = 'contsim-order-template.xlsx'
 /** The format, one rule per line. Shown in the template's Guide sheet and in the README. */
 export const ORDER_FORMAT_GUIDE: readonly string[] = [
   'One row per cabinet or box; the first row holds the column headers. Extra columns are ignored and blank rows are skipped.',
-  'Code (also accepted: Type, Item, SKU, Name, Box): the catalog code, for example 3036 or DB18(4). Any other text makes a custom box named after it.',
+  'Code (also accepted: Type, Item, SKU, Name, Box): a code from the catalog, for example 3036. Any other text makes a custom box named after it, which you can save into the catalog from its row.',
   'Qty (also accepted: Quantity, Count, Pcs, Requested): a whole number.',
   "Width, Depth, Height (also accepted: W, D, H): only needed for boxes that are not in the catalog; ignored for catalog codes. Width runs along the container's length.",
   'Units: put the unit in the header, for example "Width (mm)". Without one, the unit selected in the app applies.',
@@ -66,12 +67,6 @@ const UNIT_WORDS: Record<string, Unit> = {
   m: 'm',
 }
 
-const MM: Record<Unit, number> = { in: 25.4, ft: 304.8, cm: 10, mm: 1, m: 1000 }
-
-export function convertLength(value: number, from: Unit, to: Unit): number {
-  return from === to ? value : Number(((value * MM[from]) / MM[to]).toFixed(3))
-}
-
 export interface Header {
   column: Column
   /** The header word that matched, e.g. "length". */
@@ -98,9 +93,6 @@ export function parseHeader(cell: CellValue | undefined): Header | null {
   return null
 }
 
-const normalizeCode = (code: string) => code.toUpperCase().replace(/\s+/g, '')
-const byCode = new Map(CATALOG.map((item) => [normalizeCode(item.code), item]))
-
 const cellText = (cell: CellValue | undefined): string =>
   cell === undefined ? '' : String(cell).trim()
 
@@ -126,8 +118,12 @@ export type ImportedContainer = NonNullable<ScenarioImport['container']>
 export interface Imported extends ScenarioImport {
   /** Boxes in total. */
   boxes: number
+  /** Rows that were left out. */
+  skipped: number
   /** Rows skipped or merged, in plain language. */
   notes: string[]
+  /** The unit named by a size column header, when there was one. */
+  detectedUnit: Unit | null
 }
 
 export type ImportParse = { ok: true; imported: Imported } | { ok: false; error: string }
@@ -186,6 +182,7 @@ export function importOrder(
   }
 
   const notes: string[] = []
+  let skipped = 0
   const merged = new Map<string, BoxTypeDraft>()
   const ids = existing.map((t) => t.id)
   const usedColors: string[] = []
@@ -219,19 +216,21 @@ export function importOrder(
     if (row.every((cell) => cellText(cell) === '')) continue
     const code = cellText(row[columns.code!.index])
     if (!code) {
+      skipped++
       notes.push(`Row ${line}: no code, skipped`)
       continue
     }
     const qty = parseQuantity(row[columns.qty!.index])
     if (qty === null) {
       const shown = cellText(row[columns.qty!.index]) || 'blank'
+      skipped++
       notes.push(`Row ${line} (${code}): quantity "${shown}" is not a whole number, skipped`)
       continue
     }
     const colorText = columns.color ? cellText(row[columns.color.index]) : ''
     const color = /^#[0-9a-f]{6}$/i.test(colorText) ? colorText.toLowerCase() : null
 
-    const item: CatalogItem | undefined = byCode.get(normalizeCode(code))
+    const item: CatalogItem | null = findCatalogItem(code)
     if (item) {
       add(
         `catalog:${item.code}`,
@@ -258,6 +257,7 @@ export function importOrder(
         `"${code}"`,
       )
     } else {
+      skipped++
       notes.push(`Row ${line}: "${code}" is not in the catalog and has no complete size, skipped`)
     }
   }
@@ -267,11 +267,20 @@ export function importOrder(
     return { ok: false, error: `No usable rows. ${notes[0] ?? ''}`.trim() }
   }
   const boxes = types.reduce((n, t) => n + Number(t.qty), 0)
-  return { ok: true, imported: { types, boxes, notes, container: null } }
+  const detectedUnit = sizeColumns.find((c) => c?.unit)?.unit ?? null
+  return {
+    ok: true,
+    imported: { types, boxes, skipped, notes, unit, detectedUnit, container: null },
+  }
+}
+
+export interface Summary {
+  container: ImportedContainer
+  unit: Unit
 }
 
 /** The container settings written by the Excel export's Summary sheet, if they are all there. */
-export function readSummary(rows: Row[], fallbackUnit: Unit): ImportedContainer | null {
+export function readSummary(rows: Row[], fallbackUnit: Unit): Summary | null {
   const values = new Map<string, CellValue | undefined>()
   for (const row of rows) {
     const key = cellText(row[0]).toLowerCase()
@@ -283,7 +292,7 @@ export function readSummary(rows: Row[], fallbackUnit: Unit): ImportedContainer 
   if (!typeName) return null
   const preset = CONTAINER_PRESETS.find((p) => p.name.toLowerCase() === typeName)
   const keepUpright = cellText(values.get('keep boxes upright')).toLowerCase() === 'yes'
-  if (preset) return { containerType: preset.id, container: null, unit, keepUpright }
+  if (preset) return { container: { containerType: preset.id, container: null, keepUpright }, unit }
 
   const dims = ['length', 'width', 'height'].map((side) => {
     const entry = [...values.entries()].find(([k]) => k.startsWith(`container ${side}`))
@@ -292,10 +301,12 @@ export function readSummary(rows: Row[], fallbackUnit: Unit): ImportedContainer 
   })
   if (!dims.every((d): d is string => d !== null)) return null
   return {
-    containerType: 'custom',
-    container: { l: dims[0], w: dims[1], h: dims[2] },
+    container: {
+      containerType: 'custom',
+      container: { l: dims[0], w: dims[1], h: dims[2] },
+      keepUpright,
+    },
     unit,
-    keepUpright,
   }
 }
 
@@ -312,10 +323,10 @@ export function importWorkbook(
   const boxes = byName('boxes')
   const summary = byName('summary')
   if (boxes && summary) {
-    const container = readSummary(summary.rows, unit)
-    const parsed = importOrder(boxes.rows, container?.unit ?? unit, existing)
+    const read = readSummary(summary.rows, unit)
+    const parsed = importOrder(boxes.rows, read?.unit ?? unit, existing)
     if (!parsed.ok) return parsed
-    return { ok: true, imported: { ...parsed.imported, container } }
+    return { ok: true, imported: { ...parsed.imported, container: read?.container ?? null } }
   }
   return importOrder(sheets[0]!.rows, unit, existing)
 }
@@ -330,7 +341,7 @@ export function orderTemplate(unit: Unit): Workbook {
         header: ['Code', 'Qty', `Width (${unit})`, `Depth (${unit})`, `Height (${unit})`, 'Note'],
         rows: [
           ['3036', 4, null, null, null, 'A catalog code: the size comes from the catalog'],
-          ['DB18(4)', 2, null, null, null, ''],
+          ['2442', 2, null, null, null, ''],
           ['Crate', 1, size(40), size(30), size(20), 'Not in the catalog: give the size'],
         ],
         widths: [14, 8, 12, 12, 12, 50],

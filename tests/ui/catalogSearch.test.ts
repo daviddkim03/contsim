@@ -1,16 +1,19 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { CATALOG } from '../../src/catalog'
+import { addUserCatalogItem, resetUserCatalog } from '../../src/ui/catalogStore'
 import {
   catalogDims,
-  findCatalogItem,
   formatCatalogDims,
   inchesToUnit,
   searchCatalog,
 } from '../../src/ui/catalogSearch'
+import { findCatalogItem } from '../../src/ui/catalogStore'
+
+beforeEach(() => resetUserCatalog())
 
 describe('catalog', () => {
   it('has unique codes and positive sizes', () => {
-    expect(CATALOG.length).toBeGreaterThan(100)
+    expect(CATALOG.length).toBeGreaterThan(0)
     expect(new Set(CATALOG.map((c) => c.code)).size).toBe(CATALOG.length)
     for (const c of CATALOG) {
       expect(c.w).toBeGreaterThan(0)
@@ -44,36 +47,34 @@ describe('searchCatalog', () => {
 
   it('lists the whole catalog for an empty query, up to the limit', () => {
     const all = searchCatalog('', 'in')
-    expect(all.items).toHaveLength(40)
-    expect(all.more).toBe(CATALOG.length - 40)
-    expect(all.items[0]!.code).toBe('9')
-    expect(searchCatalog('', 'in', 10).items).toHaveLength(10)
+    expect(all.items.map((i) => i.code)).toEqual(CATALOG.map((i) => i.code))
+    expect(all.more).toBe(0)
+    expect(searchCatalog('', 'in', 3)).toMatchObject({ more: CATALOG.length - 3 })
+    expect(searchCatalog('', 'in', 3).items).toHaveLength(3)
   })
 
   it('finds a code exactly, then by prefix, then anywhere in the code', () => {
     expect(codes('3036')).toEqual(['3036'])
-    const db = codes('db')
-    expect(db[0]).toBe('DB9')
-    expect(db.every((c) => c.includes('DB'))).toBe(true)
-    expect(db.indexOf('VDB9')).toBeGreaterThan(db.indexOf('DB30'))
-    expect(codes('P24')).toEqual(['P249624', 'P249024', 'P248424'])
+    // "36" is a code of its own and part of 3036.
+    expect(codes('36')).toEqual(['36', '3036'])
+    expect(codes('p')).toEqual(['P249624'])
+    // Codes containing 24 come first, then the cabinets that are 24 deep.
+    expect(codes('24')).toEqual(['2442', 'P249624', '18', '36'])
   })
 
   it('finds cabinets by size, in any order and with x between numbers', () => {
     expect(codes('30 12 36')[0]).toBe('3036')
     expect(codes('30x12x36')[0]).toBe('3036')
     expect(codes('36 x 12 x 30')).toContain('3036')
-    const base24 = codes('24x34.5')
-    expect(base24[0]).toBe('24')
-    expect(base24).toContain('DB24')
-    expect(base24).toContain('VB24')
-    expect(base24).not.toContain('3036')
+    const base = codes('24x34.5')
+    expect(base).toEqual(['18', '36'])
+    expect(codes('34.5')).toEqual(['18', '36'])
   })
 
   it('matches sizes typed in the display unit', () => {
-    expect(codes('876.3', 'mm')).toContain('9')
+    expect(codes('876.3', 'mm')).toEqual(['18', '36'])
     const wide = searchCatalog('762 304.8', 'mm').items
-    expect(wide[0]!.code).toBe('3042')
+    expect(wide[0]!.code).toBe('3036')
     for (const item of wide) {
       const mm = [item.w, item.d, item.h].map((v) => inchesToUnit(v, 'mm'))
       expect(mm).toContain(762)
@@ -83,5 +84,12 @@ describe('searchCatalog', () => {
 
   it('returns nothing for nonsense', () => {
     expect(searchCatalog('zzz', 'in')).toEqual({ items: [], more: 0 })
+  })
+
+  it('searches the saved items too, after the built-in ones', () => {
+    addUserCatalogItem('Crate', { w: 40, d: 30, h: 20 })
+    expect(codes('crate')).toEqual(['Crate'])
+    expect(codes('40x30x20')).toEqual(['Crate'])
+    expect(searchCatalog('', 'in').items.at(-1)!.code).toBe('Crate')
   })
 })

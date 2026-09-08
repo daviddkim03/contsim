@@ -7,12 +7,12 @@ Pick a standard shipping container (or type a custom interior size), add cabinet
 ## Features
 
 - Container presets: 10 ft, 20 ft, 20 ft high cube, 40 ft, 40 ft high cube, 45 ft high cube (typical interior sizes, converted to the chosen unit), or a custom size.
-- A searchable cabinet catalog (174 codes with width x depth x height) behind every box row: type a code or a size such as `30x12x36`, pick, set the quantity. "Custom size" turns a row into a box with typed dimensions.
+- A searchable cabinet catalog behind every box row: type a code or a size such as `30x12x36`, pick, set the quantity. "Custom size" turns a row into a box with typed dimensions, and the star on that row saves it into the catalog for next time.
 - As many containers as it takes: what does not fit in the first container goes to the next one of the same type. The status reads **Fits**, **2 containers**, **Impossible** (a box that fits in no container in any orientation; the rest is still packed), or **Too many**.
 - Automatic optimization: whenever a load needs more than one container, an optimizer runs in a Web Worker and fills each container with as much volume as it can, often saving a container. No button to press; the result replaces the first-fit packing when it is better.
 - 3D view with orbit and zoom, a container switcher, a layer slider to look inside, hover highlighting per box type, and a table view of every placement in every container.
-- Units: in, ft, cm, mm, m. Presets and catalog sizes convert; typed numbers keep their value. All math happens on exact integers.
-- **Import** an order from Excel or CSV: one row per cabinet with a code and a quantity, sizes only for boxes outside the catalog. An order template with a guide sheet is one click away, and the Excel export imports back too, container settings included. The scenario also persists in the browser.
+- Units: in, ft, cm, mm, m. Every size is a real measurement, so switching the unit converts all of them. All packing math happens on exact integers.
+- **Import** an order from Excel or CSV: one row per cabinet with a code and a quantity, sizes only for boxes outside the catalog. contsim asks which unit the file's sizes are in, since a spreadsheet rarely says. An order template with a guide sheet is one click away, and the Excel export imports back too, container settings included. The scenario also persists in the browser.
 - **Export Excel** writes an .xlsx workbook with four sheets: a summary (status, container, totals), one row per container, one row per box type (requested, placed, left out, volumes), and one row per placed box (container, position, oriented size). Read and written by a small in-house reader and writer, no spreadsheet library.
 - No backend, no accounts, one runtime dependency (three.js).
 
@@ -32,17 +32,21 @@ Click **Import** in the Boxes panel and pick an .xlsx or .csv file. **Order temp
 6. Rows with the same code are added together.
 7. Files: .xlsx (the first sheet is read) or .csv (comma, semicolon or tab separated). A workbook saved with Export Excel is recognized too: its Boxes sheet restores the order and its Summary sheet the container, unit and upright setting.
 
-Rows that cannot be used are listed under the buttons after the import, with the reason.
+Before anything changes, contsim shows what it found and asks which unit the file's sizes are in, defaulting to the unit named in a header if there is one. The app then switches to that unit, so the numbers on screen match the numbers in the file. A workbook saved by contsim states its own unit and is not asked about. Rows that cannot be used are listed under the buttons after the import, with the reason.
 
 ## The cabinet catalog
 
-The catalog lives in `data/catalog.xlsx`: a header row `TYPE, W, D, H` (inches; further columns are ignored) and one cabinet per row. To change it, replace the file and run
+contsim ships with five placeholder cabinets so the app has something to show. There are two ways to put real ones in.
+
+**From the app.** Make a box a custom size, give it a name and its dimensions, then press the star on its row. It joins the catalog under that name, is marked "saved" in the picker, and stays in the browser. Pressing the star again takes it back out.
+
+**From a spreadsheet**, which is the way to load a whole catalog at once. `data/catalog.xlsx` holds a header row `TYPE, W, D, H` (inches; further columns are ignored) and one cabinet per row. Replace the file and run
 
 ```
 npm run catalog
 ```
 
-which regenerates `src/catalog.ts`. Codes must be unique and sizes positive; the script refuses anything else. Width runs along the container's length, depth along its width, height is up.
+which regenerates `src/catalog.ts`. Codes must be unique and sizes positive; the script refuses anything else. Width runs along the container's length, depth along its width, height is up. `npm run catalog:placeholder` writes the five-row starter file back.
 
 ## Develop
 
@@ -84,7 +88,7 @@ npm run build -- --base /contsim/     # served from a sub-path, e.g. https://exa
 ## Layout of the code
 
 - `src/core` - the algorithm: types, geometry, impossibility checks, packer, optimizer, and `multi.ts` (as many containers as needed). Pure functions, no DOM, no three.js (enforced by ESLint), fully unit tested.
-- `src/ui` - state store, unit handling, container presets, catalog search and the picker (`combobox.ts`), sidebar, status and legend, 3D viewer, the background optimizer (`optimizeClient.ts` + worker), the Excel export (`report.ts` builds the workbook, `xlsx.ts` and `zip.ts` write the file) and the import (`spreadsheet.ts` reads .xlsx and .csv, `orderImport.ts` turns rows into boxes).
+- `src/ui` - state store, unit handling, container presets, the catalog (`catalogStore.ts` holds built-in plus saved items, `catalogSearch.ts` searches them, `combobox.ts` is the picker), sidebar, status and legend, 3D viewer, the background optimizer (`optimizeClient.ts` + worker), the Excel export (`report.ts` builds the workbook, `xlsx.ts` and `zip.ts` write the file) and the import (`spreadsheet.ts` reads .xlsx and .csv, `orderImport.ts` turns rows into boxes, `importDialog.ts` asks about the unit).
 - `src/catalog.ts` - generated from `data/catalog.xlsx` by `scripts/import-catalog.ts`.
 - `src/scenarios.ts` - synthetic scenarios used by the core tests; `src/ui/example.ts` is the order the app opens with.
 - `tests/core`, `tests/ui` - Vitest suites; `tests/e2e` - Playwright.

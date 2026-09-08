@@ -3,22 +3,13 @@
  * dimensions, and the search behind the box picker (by code or by size).
  */
 
-import { CATALOG, type CatalogItem } from '../catalog'
+import type { CatalogItem } from '../catalog'
 import type { Dims } from '../core'
-import type { Unit } from './units'
-
-const PER_INCH: Record<Unit, number> = { in: 1, ft: 1 / 12, mm: 25.4, cm: 2.54, m: 0.0254 }
-/** Decimals that keep every catalog size exact in that unit (34.5 in = 876.3 mm = 2.875 ft). */
-const DECIMALS: Record<Unit, number> = { in: 3, ft: 3, mm: 1, cm: 2, m: 3 }
+import { catalogItems } from './catalogStore'
+import { convertLength, type Unit } from './units'
 
 export function inchesToUnit(inches: number, unit: Unit): number {
-  return Number((inches * PER_INCH[unit]).toFixed(DECIMALS[unit]))
-}
-
-const byCode = new Map(CATALOG.map((item) => [item.code, item]))
-
-export function findCatalogItem(code: string): CatalogItem | null {
-  return byCode.get(code) ?? null
+  return convertLength(inches, 'in', unit)
 }
 
 /** Width runs along the container's length, depth along its width, height is up. */
@@ -73,7 +64,7 @@ function wordRank(word: string, code: string, dims: string[]): number | null {
 export function searchCatalog(query: string, unit: Unit, limit = 40): CatalogSearchResult {
   const words = query.toLowerCase().split(SEPARATORS).filter(Boolean)
   const ranked: { item: CatalogItem; rank: number; index: number }[] = []
-  CATALOG.forEach((item, index) => {
+  catalogItems().forEach((item, index) => {
     if (words.length === 0) {
       ranked.push({ item, rank: 0, index })
       return

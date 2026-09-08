@@ -1,23 +1,19 @@
-import { catalogTexts, findCatalogItem } from './catalogSearch'
+import { catalogTexts } from './catalogSearch'
+import { findCatalogItem } from './catalogStore'
 import { PALETTE } from './palette'
 import type { Draft } from './state'
 
 /**
- * The order the app opens with: cabinets for about ten kitchens, enough to
- * overflow one 20 ft container so the second container and the background
- * optimizer show up right away.
+ * The order the app opens with: every cabinet in the placeholder catalog, in
+ * quantities that overflow one 20 ft container, so the second container and
+ * the background optimizer show up right away.
  */
 const ORDER: [code: string, qty: number][] = [
-  ['36', 20],
-  ['18', 20],
-  ['DB18', 10],
-  ['SB36', 10],
-  ['BC36', 10],
-  ['3036', 30],
-  ['1830', 20],
-  ['2442', 10],
-  ['P249624', 10],
-  ['VSB36', 10],
+  ['18', 28],
+  ['36', 28],
+  ['3036', 42],
+  ['2442', 28],
+  ['P249624', 14],
 ]
 
 export function exampleDraft(): Draft {

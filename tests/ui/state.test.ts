@@ -100,8 +100,30 @@ describe('container presets', () => {
     expect(derive(draft).scenario?.container).toEqual({ l: 4737, w: 926, h: 1062 })
     expect(derive(draft).scale).toBe(10)
     const metric = edits.setUnit(draft, 'mm')
-    expect(derive(metric).scenario?.container).toEqual({ l: 12032, w: 2352, h: 2698 })
-    expect(derive(metric).scale).toBe(1)
+    // 12,032 mm at a scale of 10, because the boxes now have a decimal (48 in = 1219.2 mm).
+    expect(derive(metric).scale).toBe(10)
+    expect(derive(metric).scenario?.container).toEqual({ l: 120320, w: 23520, h: 26980 })
+  })
+
+  it('converts every typed size when the unit changes, and takes catalog sizes from the catalog', () => {
+    const draft = edits.setUnit(mixed(), 'mm')
+    // Custom boxes: 48 x 40 x 48 in.
+    expect(draft.types[0]).toMatchObject({ kind: 'custom', l: '1219.2', w: '1016', h: '1219.2' })
+    // The custom container size travels with the unit even while a preset is selected.
+    expect(draft.container).toEqual({ l: '5892.8', w: '2336.8', h: '2387.6' })
+    expect(edits.setUnit(draft, 'in').types[0]).toMatchObject({ l: '48', w: '40', h: '48' })
+    // Selecting the unit that is already set changes nothing.
+    const unchanged = mixed()
+    expect(edits.setUnit(unchanged, 'in')).toBe(unchanged)
+
+    let fromCatalog = edits.addType(mixed())
+    const id = fromCatalog.types.at(-1)!.id
+    fromCatalog = edits.setCatalogItem(fromCatalog, id, '3036')
+    expect(edits.setUnit(fromCatalog, 'mm').types.at(-1)).toMatchObject({
+      l: '762',
+      w: '304.8',
+      h: '914.4',
+    })
   })
 
   it('keeps the custom dimensions while a preset is selected and prefills custom from the preset', () => {
@@ -220,23 +242,28 @@ describe('edits', () => {
   it('applyImport replaces the rows and applies container settings when the file has them', () => {
     const draft = mixed()
     const types = [{ ...draft.types[0]!, id: 'new', qty: '7' }]
-    const plain = edits.applyImport(draft, { types, container: null })
+    const plain = edits.applyImport(draft, { types, unit: 'in', container: null })
     expect(plain.types).toBe(types)
     expect(plain).toMatchObject({ unit: 'in', containerType: 'custom', keepUpright: false })
 
+    // Without container settings the file's unit still applies, so the container converts.
+    const metric = edits.applyImport(draft, { types, unit: 'mm', container: null })
+    expect(metric).toMatchObject({ unit: 'mm', containerType: 'custom' })
+    expect(metric.container).toEqual({ l: '5892.8', w: '2336.8', h: '2387.6' })
+
     const preset = edits.applyImport(draft, {
       types,
-      container: { containerType: '40ft', container: null, unit: 'mm', keepUpright: true },
+      unit: 'mm',
+      container: { containerType: '40ft', container: null, keepUpright: true },
     })
     expect(preset).toMatchObject({ containerType: '40ft', unit: 'mm', keepUpright: true })
-    expect(preset.container).toEqual(draft.container)
 
     const custom = edits.applyImport(draft, {
       types,
+      unit: 'cm',
       container: {
         containerType: 'custom',
         container: { l: '1', w: '2', h: '3' },
-        unit: 'cm',
         keepUpright: false,
       },
     })
