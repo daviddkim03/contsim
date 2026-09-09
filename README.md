@@ -7,7 +7,7 @@ Pick a standard shipping container (or type a custom interior size), add cabinet
 ## Features
 
 - Container presets: 10 ft, 20 ft, 20 ft high cube, 40 ft, 40 ft high cube, 45 ft high cube (typical interior sizes, converted to the chosen unit), or a custom size.
-- A searchable cabinet catalog behind every box row: type a code or a size such as `30x12x36`, pick, set the quantity. "Custom size" turns a row into a box with typed dimensions, and the star on that row saves it into the catalog for next time.
+- A searchable cabinet catalog behind every box row: type a code or a size such as `30x12x36`, pick, set the quantity. "Custom size" turns a row into a box with typed dimensions, and the star on that row saves it into the catalog for next time. **Clear** empties the whole list when the next order has nothing to do with this one.
 - As many containers as it takes: what does not fit in the first container goes to the next one of the same type. The status reads **Fits**, **2 containers**, **Impossible** (a box that fits in no container in any orientation; the rest is still packed), or **Too many**.
 - Two loading modes, chosen in the sidebar:
   - **Even** (the default) spreads the load, so every container holds close to the same number of boxes and the same mix of types. It never opens a container that filling one at a time would not have needed.

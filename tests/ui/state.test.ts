@@ -225,6 +225,20 @@ describe('edits', () => {
     expect(mixed().types.map((t) => t.color)).not.toContain(added.color)
   })
 
+  it('clearTypes empties the list and lets the container be', () => {
+    const draft = edits.setContainerCount(mixed(), 0, 'pallet', 2)
+    const cleared = edits.clearTypes(draft)
+    expect(cleared.types).toEqual([])
+    expect(cleared.allocation).toBeNull()
+    expect(cleared).toMatchObject({ containerType: draft.containerType, unit: draft.unit })
+    // Nothing requested is not an error; the app just asks for a first box.
+    const d = derive(cleared)
+    expect(d.issues).toEqual({})
+    expect(d.result?.stats).toMatchObject({ requested: 0, placed: 0, containers: 0 })
+    // Clearing an empty list changes nothing at all.
+    expect(edits.clearTypes(cleared)).toBe(cleared)
+  })
+
   it('removeType drops exactly that box', () => {
     const draft = edits.removeType(mixed(), 'crate')
     expect(draft.types.map((t) => t.id)).toEqual(['pallet', 'medium', 'tote', 'small'])

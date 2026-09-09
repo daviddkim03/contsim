@@ -521,6 +521,10 @@ export const edits = {
   removeType(draft: Draft, id: string): Draft {
     return { ...draft, types: draft.types.filter((t) => t.id !== id) }
   },
+  /** Empties the box list, keeping the container and the settings. */
+  clearTypes(draft: Draft): Draft {
+    return draft.types.length === 0 ? draft : { ...draft, types: [], allocation: null }
+  },
   setTypeField(draft: Draft, id: string, field: TypeField, value: string): Draft {
     return {
       ...draft,

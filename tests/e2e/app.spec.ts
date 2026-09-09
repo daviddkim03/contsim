@@ -391,6 +391,38 @@ test('the payload limit fills containers by weight as well as by space', async (
   ).toContainText('lb')
 })
 
+test('Clear empties the box list in one go, after asking', async ({ page }) => {
+  const clear = page.locator('[data-action="clear"]')
+  await expect(page.locator('.box-row')).toHaveCount(5)
+  await expect(clear).toBeEnabled()
+
+  // Backing out of the question leaves the order alone.
+  page.once('dialog', (dialog) => void dialog.dismiss())
+  await clear.click()
+  await expect(page.locator('.box-row')).toHaveCount(5)
+
+  let asked = ''
+  page.once('dialog', (dialog) => {
+    asked = dialog.message()
+    void dialog.accept()
+  })
+  await clear.click()
+  await expect(page.locator('.box-row')).toHaveCount(0)
+  expect(asked).toBe('Remove all 5 box rows?')
+  await expect(clear).toBeDisabled()
+  await expect(page.locator('.panel.boxes .empty')).toBeVisible()
+  await expect(badge(page)).toHaveText('Fits')
+  await expect(page.locator('.message')).toHaveText('Add a cabinet to get started.')
+  // The container and its settings stay, ready for the next order.
+  await expect(page.locator('[data-field="containerType"]')).toHaveValue('20ft')
+  await page.reload()
+  await expect(page.locator('.box-row')).toHaveCount(0)
+
+  await page.locator('[data-action="add"]').click()
+  await expect(page.locator('.box-row')).toHaveCount(1)
+  await expect(clear).toBeEnabled()
+})
+
 test('the table view lists every placement in every container', async ({ page }) => {
   await expect(page.locator('.stage-table')).toBeHidden()
   await page.locator('[data-mode="table"]').click()

@@ -103,6 +103,7 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
         <h2>Boxes</h2>
         <div class="title-actions">
           <button type="button" class="ghost" data-action="import">Import</button>
+          <button type="button" class="ghost" data-action="clear">Clear</button>
           <button type="button" class="ghost" data-action="add">+ Add box</button>
         </div>
       </div>
@@ -149,6 +150,7 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
   const list = query<HTMLUListElement>(root, '.box-list')
   const empty = query<HTMLElement>(root, '.empty')
   const importInput = query<HTMLInputElement>(root, '[data-field="import-file"]')
+  const clearButton = query<HTMLButtonElement>(root, '[data-action="clear"]')
   const excelButton = query<HTMLButtonElement>(root, '[data-action="export-excel"]')
   const footerHint = query<HTMLElement>(root, '[data-role="footer-hint"]')
   /** A message about the last import; cleared by the next change to the draft. */
@@ -214,6 +216,14 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
       case 'remove':
         if (id) store.edit((d) => edits.removeType(d, id))
         break
+      case 'clear': {
+        const rows = store.get().draft.types.length
+        // Removing a whole order is worth one question; there is no undo.
+        if (rows > 0 && window.confirm(`Remove all ${rows} box rows?`)) {
+          store.edit(edits.clearTypes)
+        }
+        break
+      }
       case 'toggle-catalog':
         if (id) toggleCatalog(id)
         break
@@ -550,6 +560,7 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
     empty.hidden = draft.types.length > 0
 
     const result = derived.result
+    clearButton.disabled = draft.types.length === 0
     excelButton.disabled = !result
     footerHint.classList.toggle('error', notice?.error ?? false)
     setText(

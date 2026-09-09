@@ -321,6 +321,7 @@ The takeoff-tool screenshot is the layout and style reference: dark left sidebar
 
 - Every edit (container dims, box dims, qty, upright toggle) re-runs the checks and the packer, debounced ~150 ms. There is no "Check" button; the status is always current. The unit selector sits next to the container dims in the sidebar rather than above the canvas.
 - Qty has - / + steppers and accepts typing; arrow keys step. Minimum 0. A type with qty 0 stays in the list, greyed out.
+- Clear, beside Import and + Add box, empties the box list after one confirmation; the container, units and settings stay for the next order. It is the only way out of a long list, since rows are otherwise removed one at a time.
 - Status badge:
   - Fits (green): "All 24 boxes placed. Fill 71 %."
   - Doesn't fit (amber): "Placed 21 of 24. No arrangement found for the rest; it may still be possible. Try Optimize or reduce quantities."
