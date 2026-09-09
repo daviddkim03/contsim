@@ -35,6 +35,17 @@ export interface BoxTypeDraft {
 export const BOX_KINDS: readonly BoxKind[] = ['catalog', 'custom']
 export const LOAD_MODES: readonly LoadMode[] = ['even', 'optimize']
 
+/**
+ * Box counts the user moved between containers by hand, kept only for the
+ * scenario they were set for: change a container, a box size, the mode or the
+ * unit and the packing is a different one, so the counts are dropped.
+ */
+export interface Allocation {
+  shape: string
+  /** Pinned counts by container index, then type id. */
+  counts: Record<string, number>[]
+}
+
 /** What an imported spreadsheet contributes: box rows, and container settings when the file has them. */
 export interface ScenarioImport {
   types: BoxTypeDraft[]
@@ -54,11 +65,36 @@ export interface Draft {
   containerType: ContainerType
   /** How the boxes are spread over the containers. */
   mode: LoadMode
+  /** Hand-placed box counts, or null while the split is left to the mode. */
+  allocation: Allocation | null
   /** Custom interior dimensions. Kept while a preset is selected, so switching back restores them. */
   container: { l: string; w: string; h: string }
   types: BoxTypeDraft[]
   keepUpright: boolean
   unit: Unit
+}
+
+/**
+ * What the packing depends on, apart from the quantities. Hand-placed counts
+ * only make sense for one of these, so they travel with it.
+ */
+export function scenarioShape(draft: Draft): string {
+  const c = containerTexts(draft)
+  return JSON.stringify([
+    c.l,
+    c.w,
+    c.h,
+    draft.unit,
+    draft.mode,
+    draft.keepUpright,
+    draft.types.map((t) => [t.id, t.kind, t.catalogCode, t.l, t.w, t.h]),
+  ])
+}
+
+/** The counts to pack with: the hand-placed ones, if they are still for this scenario. */
+export function allocationOf(draft: Draft): Record<string, number>[] | undefined {
+  const a = draft.allocation
+  return a && a.shape === scenarioShape(draft) ? a.counts : undefined
 }
 
 /** The container dimensions the draft stands for: the preset's, or the typed ones. */
@@ -158,6 +194,7 @@ export function draftFromScenario(scenario: Scenario, unit: Unit): Draft {
   return {
     containerType: 'custom',
     mode: 'even',
+    allocation: null,
     container: {
       l: s(scenario.container.l),
       w: s(scenario.container.w),
@@ -260,7 +297,11 @@ export function derive(draft: Draft): Derived {
   const scenario: Scenario = { container, types, keepUpright: draft.keepUpright }
   // In 'even' mode this is the finished answer; in 'optimize' mode it is first
   // fit, which the worker then improves on (src/ui/optimizeClient.ts).
-  const result = packMany(container, types, { keepUpright: draft.keepUpright, mode: draft.mode })
+  const result = packMany(container, types, {
+    keepUpright: draft.keepUpright,
+    mode: draft.mode,
+    allocation: allocationOf(draft),
+  })
   return { scale, issues, scenario, result, stale: false }
 }
 
@@ -302,6 +343,23 @@ export const edits = {
    */
   setMode(draft: Draft, mode: LoadMode): Draft {
     return mode === draft.mode ? draft : { ...draft, mode }
+  },
+  /**
+   * Puts `count` boxes of a type in one container. The rest of them move to
+   * the containers after it, and the packer still only takes what fits, so
+   * asking for more than a container can hold quietly stops at its capacity.
+   */
+  setContainerCount(draft: Draft, container: number, typeId: string, count: number): Draft {
+    const shape = scenarioShape(draft)
+    const counts =
+      draft.allocation?.shape === shape ? draft.allocation.counts.map((c) => ({ ...c })) : []
+    while (counts.length <= container) counts.push({})
+    counts[container]![typeId] = Math.max(0, Math.round(count))
+    return { ...draft, allocation: { shape, counts } }
+  },
+  /** Hands the split back to the loading mode. */
+  clearAllocation(draft: Draft): Draft {
+    return draft.allocation === null ? draft : { ...draft, allocation: null }
   },
   setUnit(draft: Draft, unit: Unit): Draft {
     if (unit === draft.unit) return draft
@@ -431,6 +489,25 @@ export function serializeDraft(draft: Draft): string {
 
 const isString = (v: unknown): v is string => typeof v === 'string'
 
+/** null when there is nothing saved, undefined when what is saved is not an allocation. */
+function parseAllocation(value: unknown): Allocation | null | undefined {
+  if (value === undefined || value === null) return null
+  if (typeof value !== 'object') return undefined
+  const a = value as Record<string, unknown>
+  if (!isString(a.shape) || !Array.isArray(a.counts)) return undefined
+  const counts: Record<string, number>[] = []
+  for (const entry of a.counts) {
+    if (!entry || typeof entry !== 'object') return undefined
+    const one: Record<string, number> = {}
+    for (const [id, n] of Object.entries(entry as Record<string, unknown>)) {
+      if (typeof n !== 'number' || !Number.isInteger(n) || n < 0) return undefined
+      one[id] = n
+    }
+    counts.push(one)
+  }
+  return { shape: a.shape, counts }
+}
+
 /** Reads a draft back from JSON, rejecting anything that does not have the expected shape. */
 export function parseDraft(json: string): Draft | null {
   try {
@@ -447,6 +524,8 @@ export function parseDraft(json: string): Draft | null {
     // Drafts saved before the modes existed get the default, like a new one.
     const mode = d.mode === undefined ? 'even' : d.mode
     if (!LOAD_MODES.includes(mode as LoadMode)) return null
+    const allocation = parseAllocation(d.allocation)
+    if (allocation === undefined) return null
     const types: BoxTypeDraft[] = []
     for (const t of d.types as unknown[]) {
       const r = t as Record<string, unknown>
@@ -472,6 +551,7 @@ export function parseDraft(json: string): Draft | null {
     return {
       containerType: containerType as ContainerType,
       mode: mode as LoadMode,
+      allocation,
       container: { l: c.l, w: c.w, h: c.h },
       types,
       keepUpright: d.keepUpright === true,

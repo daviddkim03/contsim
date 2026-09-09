@@ -252,6 +252,53 @@ describe('packMany', () => {
     expect(b.containers.map((c) => c.placements)).toEqual(a.containers.map((c) => c.placements))
   })
 
+  it('puts a pinned number of boxes in a container and moves the rest along', () => {
+    const s = exampleScenario()
+    const even = packMany(s.container, s.types, { keepUpright: false, mode: 'even' })
+    const perType = (r: MultiPackResult, i: number, id: string) =>
+      r.containers[i]!.placements.filter((p) => p.typeId === id).length
+    expect(perType(even, 0, 'small')).toBe(30)
+
+    // Half as many small cartons in the first container; the rest go to the second.
+    const pinned = packMany(s.container, s.types, {
+      keepUpright: false,
+      mode: 'even',
+      allocation: [{ small: 15 }],
+    })
+    expect(perType(pinned, 0, 'small')).toBe(15)
+    expect(perType(pinned, 1, 'small')).toBe(45)
+    expect(pinned.stats.placed).toBe(138)
+    expect(multiViolation(s, pinned)).toBeNull()
+  })
+
+  it('never puts more in a container than is left, or than fits', () => {
+    const s = exampleScenario()
+    const greedy = packMany(s.container, s.types, {
+      keepUpright: false,
+      // Far more than the order holds, and more than one container can take.
+      allocation: [{ small: 9999, pallet: 9999 }],
+    })
+    const first = greedy.containers[0]!
+    expect(first.placements.filter((p) => p.typeId === 'small').length).toBeLessThanOrEqual(60)
+    expect(first.placements.filter((p) => p.typeId === 'pallet').length).toBeLessThanOrEqual(12)
+    expect(greedy.stats.placed).toBe(138)
+    expect(multiViolation(s, greedy)).toBeNull()
+  })
+
+  it('pins the later containers too, and leaves the others to the mode', () => {
+    const s = exampleScenario()
+    const r = packMany(s.container, s.types, {
+      keepUpright: false,
+      mode: 'even',
+      allocation: [undefined, { crate: 0 }],
+    })
+    expect(r.containers[1]!.placements.filter((p) => p.typeId === 'crate')).toHaveLength(0)
+    // The crates it would have held move on to a third container.
+    expect(r.containers.length).toBeGreaterThan(2)
+    expect(r.stats.placed).toBe(138)
+    expect(multiViolation(s, r)).toBeNull()
+  })
+
   it('keeps every invariant on random scenarios', () => {
     const random = mulberry32(7)
     const int = (lo: number, hi: number) => lo + Math.floor(random() * (hi - lo + 1))

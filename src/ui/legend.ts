@@ -1,8 +1,15 @@
 import { formatCatalogDims } from './catalogSearch'
 import { findCatalogItem } from './catalogStore'
-import { h, query, setText } from './dom'
+import { h, query, setText, setValue } from './dom'
 import { summarizeStatus } from './describe'
-import { shownContainer, shownResult, type AppState, type Store } from './state'
+import {
+  allocationOf,
+  edits,
+  shownContainer,
+  shownResult,
+  type AppState,
+  type Store,
+} from './state'
 import type { Panel } from './sidebar'
 import { formatNumber, formatVolume } from './units'
 
@@ -37,7 +44,10 @@ export function mountLegend(root: HTMLElement, store: Store): Panel {
       </dl>
     </section>
     <section class="containers" hidden>
-      <h2>Containers</h2>
+      <div class="panel-title">
+        <h2>Containers</h2>
+        <button type="button" class="ghost" data-action="auto-split" hidden>Reset split</button>
+      </div>
       <div class="container-list"></div>
     </section>
     <section class="legend">
@@ -59,6 +69,8 @@ export function mountLegend(root: HTMLElement, store: Store): Panel {
   }
   const containersSection = query<HTMLElement>(root, '.containers')
   const containerList = query<HTMLElement>(root, '.container-list')
+  const autoSplitButton = query<HTMLButtonElement>(root, '[data-action="auto-split"]')
+  autoSplitButton.addEventListener('click', () => store.edit(edits.clearAllocation))
   const legendList = query<HTMLUListElement>(root, '.legend-list')
   wireHover(legendList, '.legend-row', store)
 
@@ -115,6 +127,7 @@ export function mountLegend(root: HTMLElement, store: Store): Panel {
       return
     }
     const selected = shownContainer(state).index
+    autoSplitButton.hidden = allocationOf(state.draft) === undefined
     containerList.replaceChildren(
       ...result.containers.map((c, i) => {
         const value = h('span', { class: 'fill-bar-value' })
@@ -140,25 +153,66 @@ export function mountLegend(root: HTMLElement, store: Store): Panel {
     )
   }
 
+  /** Boxes of one type in the container on screen. */
+  function countHere(state: AppState, typeId: string): number {
+    const packing = shownContainer(state).packing
+    return packing?.placements.filter((p) => p.typeId === typeId).length ?? 0
+  }
+
+  /** One legend row, reused across renders so a count being typed keeps focus. */
+  function legendRow(id: string): HTMLLIElement {
+    const row = h('li', { class: 'legend-row', 'data-id': id })
+    row.innerHTML = `
+      <span class="swatch"></span>
+      <span class="legend-text">
+        <span class="legend-name"></span>
+        <span class="legend-dims"></span>
+      </span>
+      <span class="legend-count">
+        <input type="number" min="0" step="1" data-field="here" aria-label="Boxes in this container">
+        <span class="legend-total" data-role="total"></span>
+      </span>
+    `
+    const input = query<HTMLInputElement>(row, '[data-field="here"]')
+    input.addEventListener('input', () => {
+      const state = store.get()
+      const count = Number(input.value)
+      if (input.value === '' || !Number.isFinite(count)) return
+      store.edit((d) => edits.setContainerCount(d, shownContainer(state).index, id, count))
+    })
+    // Whatever did not fit stayed in the next container, so show what was packed.
+    input.addEventListener('blur', () => setValue(input, String(countHere(store.get(), id))))
+    return row
+  }
+
   function renderLegend(state: AppState): void {
     const { draft, derived } = state
     const { scenario, scale } = derived
     const result = shownResult(state)
-    const shown = shownContainer(state)
-    const multi = (result?.containers.length ?? 0) > 1
-    const rows = draft.types.map((type, index) => {
+    const editable = (result?.containers.length ?? 0) > 0
+
+    const existing = new Map<string, HTMLLIElement>()
+    for (const li of legendList.querySelectorAll<HTMLLIElement>('li[data-id]')) {
+      existing.set(li.dataset.id!, li)
+    }
+    draft.types.forEach((type, index) => {
+      let row = existing.get(type.id)
+      if (row) existing.delete(type.id)
+      else row = legendRow(type.id)
+      if (legendList.children[index] !== row) {
+        legendList.insertBefore(row, legendList.children[index] ?? null)
+      }
+
       const coreType = scenario?.types[index]
+      const requested = coreType?.qty ?? null
+      const here = countHere(state, type.id)
       const placed = result
         ? result.containers.reduce(
             (n, c) => n + c.placements.filter((p) => p.typeId === type.id).length,
             0,
           )
         : null
-      const here = shown.packing?.placements.filter((p) => p.typeId === type.id).length ?? 0
-      const requested = coreType?.qty ?? null
-      const row = h('li', { class: 'legend-row', 'data-id': type.id })
-      const swatch = h('span', { class: 'swatch' })
-      swatch.style.background = type.color
+      query<HTMLElement>(row, '.swatch').style.background = type.color
       // While another row is being fixed there is no scenario, so fall back to
       // the catalog and to whatever the row itself holds.
       const item = type.kind === 'catalog' ? findCatalogItem(type.catalogCode) : null
@@ -171,27 +225,23 @@ export function mountLegend(root: HTMLElement, store: Store): Panel {
               ? 'Not in the catalog'
               : 'No cabinet picked yet'
             : `${type.l || '?'} × ${type.w || '?'} × ${type.h || '?'} ${draft.unit}`
-      const count =
-        placed !== null && requested !== null ? `${placed} / ${requested}` : type.qty || '?'
-      if (placed !== null && requested !== null && placed < requested) row.classList.add('short')
-      const countEl = h('span', { class: 'legend-count' }, [h('span', { text: count })])
-      if (multi && placed !== null) {
-        countEl.append(
-          h('span', { class: 'legend-here', text: `${here} in container ${shown.index + 1}` }),
-        )
-      }
-      row.append(
-        swatch,
-        h('span', { class: 'legend-text' }, [
-          h('span', { class: 'legend-name', text: coreType?.name ?? type.name ?? '' }),
-          h('span', { class: 'legend-dims', text: dims }),
-        ]),
-        countEl,
+      setText(query(row, '.legend-name'), coreType?.name ?? type.name ?? '')
+      setText(query(row, '.legend-dims'), dims)
+
+      const input = query<HTMLInputElement>(row, '[data-field="here"]')
+      input.hidden = !editable
+      input.disabled = !editable
+      if (editable && document.activeElement !== input) setValue(input, String(here))
+      const total = query<HTMLElement>(row, '[data-role="total"]')
+      total.hidden = editable
+      setText(
+        total,
+        placed !== null && requested !== null ? `${placed} / ${requested}` : type.qty || '?',
       )
-      return row
+      row.classList.toggle('short', placed !== null && requested !== null && placed < requested)
     })
-    legendList.replaceChildren(...rows)
-    legendList.hidden = rows.length === 0
+    for (const row of existing.values()) row.remove()
+    legendList.hidden = draft.types.length === 0
   }
 
   /** The state the panel was drawn from; hovering a row changes none of it. */
@@ -203,29 +253,29 @@ export function mountLegend(root: HTMLElement, store: Store): Panel {
     optimize: unknown
   } | null = null
 
-  return {
-    render(state: AppState) {
-      const next = {
-        draft: state.draft,
-        derived: state.derived,
-        result: shownResult(state),
-        index: shownContainer(state).index,
-        optimize: state.optimize,
-      }
-      if (
-        shown !== null &&
-        shown.draft === next.draft &&
-        shown.derived === next.derived &&
-        shown.result === next.result &&
-        shown.index === next.index &&
-        shown.optimize === next.optimize
-      ) {
-        return
-      }
-      shown = next
-      renderStatus(state)
-      renderContainers(state)
-      renderLegend(state)
-    },
+  function render(state: AppState): void {
+    const next = {
+      draft: state.draft,
+      derived: state.derived,
+      result: shownResult(state),
+      index: shownContainer(state).index,
+      optimize: state.optimize,
+    }
+    if (
+      shown !== null &&
+      shown.draft === next.draft &&
+      shown.derived === next.derived &&
+      shown.result === next.result &&
+      shown.index === next.index &&
+      shown.optimize === next.optimize
+    ) {
+      return
+    }
+    shown = next
+    renderStatus(state)
+    renderContainers(state)
+    renderLegend(state)
   }
+
+  return { render }
 }

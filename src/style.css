@@ -656,17 +656,44 @@ button.primary:disabled {
 
 .legend-count {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
+  align-items: center;
+  justify-content: flex-end;
   font-family: var(--mono);
   font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
 
-.legend-here {
-  font-size: 11px;
-  font-weight: 400;
-  color: var(--muted);
+/* The count in the container on screen; typing moves boxes between containers. */
+.legend-count input {
+  width: 58px;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.legend-count input::-webkit-outer-spin-button,
+.legend-count input::-webkit-inner-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.legend-count input:hover {
+  border-color: var(--border);
+}
+
+.legend-count input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(242, 179, 61, 0.25);
 }
 
 /* Container list (also the selector for the 3D view) ----------------------- */

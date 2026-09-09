@@ -315,6 +315,40 @@ test('saving to the catalog refuses a name that is taken or a box without a size
   await expect(hint(page)).toHaveText('Give the box a size before saving it to the catalog.')
 })
 
+test('the legend counts the boxes in the container on screen, and moves them', async ({ page }) => {
+  const count = (index: number) => page.locator('.legend-count input').nth(index)
+  const meta = (index: number) => page.locator('.container-row .container-meta').nth(index)
+  const reset = page.locator('[data-action="auto-split"]')
+  // The example is evened out, so each container holds half of every type.
+  await expect(count(0)).toHaveValue('14')
+  await expect(count(4)).toHaveValue('7')
+  await expect(reset).toBeHidden()
+
+  // Fewer of the first cabinet here means more of it in the next container.
+  await count(0).fill('4')
+  await expect(meta(0)).toContainText('60 boxes')
+  await expect(meta(1)).toContainText('80 boxes')
+  await expect(reset).toBeVisible()
+  await page.locator('[data-action="next-container"]').click()
+  await expect(count(0)).toHaveValue('24')
+
+  // Asking for more than fits stops at what the container can take.
+  await page.locator('[data-action="prev-container"]').click()
+  await count(0).fill('999')
+  await count(0).blur()
+  await expect(count(0)).toHaveValue('28')
+  await expect(page.locator('[data-stat="placed"]')).toHaveText('140 / 140')
+
+  // The split survives a reload and a quantity change, and can be handed back.
+  await page.reload()
+  await expect(count(0)).toHaveValue('28')
+  await qty(page, 1).fill('30')
+  await expect(count(0)).toHaveValue('28')
+  await reset.click()
+  await expect(reset).toBeHidden()
+  await expect(count(0)).toHaveValue('14')
+})
+
 test('the table view lists every placement in every container', async ({ page }) => {
   await expect(page.locator('.stage-table')).toBeHidden()
   await page.locator('[data-mode="table"]').click()
@@ -338,14 +372,12 @@ test('the container switcher and the container list select what the 3D view show
   await expect(progress(page)).toBeHidden()
   await expect(label).toHaveText('Container 1 of 2')
   await expect(stage).toHaveAttribute('data-boxes', '70')
-  await expect(page.locator('.legend-row').first()).toContainText('in container 1')
 
   await page.locator('[data-action="next-container"]').click()
   await expect(label).toHaveText('Container 2 of 2')
   await expect(stage).toHaveAttribute('data-container', '1')
   await expect(stage).toHaveAttribute('data-boxes', '70')
   await expect(page.locator('.container-row.selected')).toContainText('Container 2')
-  await expect(page.locator('.legend-row').first()).toContainText('in container 2')
 
   await page.locator('[data-action="next-container"]').click()
   await expect(label).toHaveText('Container 1 of 2')

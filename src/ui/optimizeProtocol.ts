@@ -1,10 +1,12 @@
-import type { BoxType, Container, MultiPackProgress, MultiPackResult } from '../core'
+import type { BoxType, Container, LoadMode, MultiPackProgress, MultiPackResult } from '../core'
 
 /** Message from the page to the optimize worker. */
 export interface OptimizeRequest {
   container: Container
   types: BoxType[]
   keepUpright: boolean
+  mode: LoadMode
+  allocation: Record<string, number>[] | undefined
   optimizeRuns: number
   budgetMs: number
 }

@@ -69,6 +69,13 @@ export interface MultiPackOptions {
   keepUpright: boolean
   /** Default 'optimize', which is what the packer did before modes existed. */
   mode?: LoadMode
+  /**
+   * Boxes of a type the caller wants in a given container, by container index
+   * then type id. A count caps what that container is offered, so lowering it
+   * pushes the rest into later containers and raising it pulls them back; what
+   * does not fit still rolls on, so a container never holds more than it can.
+   */
+  allocation?: readonly (Record<string, number> | undefined)[]
   /** Never open more than this many containers. Default 50. */
   maxContainers?: number
   /**
@@ -241,14 +248,33 @@ export function packMany(
     return filled
   }
 
-  const everything = (left: Quantities) => left
+  const allocation = options.allocation ?? []
+
+  /** The mode's share of a container, with any count the caller pinned to it. */
+  function shareOf(base: Quantities, rest: Quantities, index: number): Quantities {
+    const pinned = allocation[index]
+    if (!pinned) return base
+    const share = { ...base }
+    for (const t of packable) {
+      const want = pinned[t.id]
+      // Never more than is left over: a pin from a bigger order still makes sense.
+      if (want !== undefined) share[t.id] = Math.min(want, rest[t.id] ?? 0)
+    }
+    return share
+  }
+
+  const everything = (rest: Quantities, index: number) => shareOf(rest, rest, index)
   let containers = fillAll(everything)
   if (mode === 'even' && containers.length > 1) {
     // Now that the container count is known, hand each one its share. An even
-    // load is not worth an extra container, so a wider spread is turned down.
+    // load is not worth an extra container, so a wider spread is turned down -
+    // unless the caller pinned counts, in which case that split is the point.
     const target = containers.length
-    const spread = fillAll((left, done) => evenShare(packable, left, Math.max(1, target - done)))
-    if (spread.length <= containers.length) containers = spread
+    const pinned = allocation.some((c) => c !== undefined)
+    const spread = fillAll((rest, done) =>
+      shareOf(evenShare(packable, rest, Math.max(1, target - done)), rest, done),
+    )
+    if (pinned || spread.length <= containers.length) containers = spread
   }
 
   const placedOf: Quantities = { ...requestedOf }

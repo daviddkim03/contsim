@@ -3,6 +3,7 @@ import {
   DEFAULT_OPTIMIZE,
   Store,
   STORAGE_KEY,
+  allocationOf,
   derive,
   draftFromScenario,
   edits,
@@ -73,6 +74,7 @@ describe('derive', () => {
     const draft: Draft = {
       containerType: 'custom',
       mode: 'even',
+      allocation: null,
       container: { l: '', w: '-', h: '9'.repeat(30) },
       types: [
         {
@@ -288,7 +290,66 @@ describe('edits', () => {
   })
 })
 
+describe('hand-placed counts', () => {
+  it('are used for the packing and can be reset', () => {
+    const store = new Store(exampleDraft(), null, 0)
+    const inFirst = (id: string) =>
+      store.get().derived.result!.containers[0]!.placements.filter((p) => p.typeId === id).length
+    expect(inFirst('18')).toBe(14)
+
+    store.edit((d) => edits.setContainerCount(d, 0, '18', 4))
+    expect(allocationOf(store.get().draft)).toEqual([{ '18': 4 }])
+    expect(inFirst('18')).toBe(4)
+
+    store.edit(edits.clearAllocation)
+    expect(store.get().draft.allocation).toBeNull()
+    expect(inFirst('18')).toBe(14)
+  })
+
+  it('survive a quantity change but not a change of scenario', () => {
+    const pinned = edits.setContainerCount(exampleDraft(), 1, '36', 3)
+    expect(allocationOf(pinned)).toEqual([{}, { '36': 3 }])
+    expect(allocationOf(edits.setTypeField(pinned, '18', 'qty', '2'))).toEqual([{}, { '36': 3 }])
+    // A different container, mode, unit or box size makes them meaningless.
+    expect(allocationOf(edits.setContainerType(pinned, '40ft'))).toBeUndefined()
+    expect(allocationOf(edits.setMode(pinned, 'optimize'))).toBeUndefined()
+    expect(allocationOf(edits.setUnit(pinned, 'mm'))).toBeUndefined()
+    expect(allocationOf(edits.setKeepUpright(pinned, true))).toBeUndefined()
+    expect(allocationOf(edits.removeType(pinned, '18'))).toBeUndefined()
+    expect(allocationOf(edits.setCustom(pinned, '18', 'Crate'))).toBeUndefined()
+    // Still there, so the app can tell a stale split from none at all.
+    expect(edits.setContainerType(pinned, '40ft').allocation).not.toBeNull()
+  })
+
+  it('are whole and never negative', () => {
+    const draft = edits.setContainerCount(
+      edits.setContainerCount(exampleDraft(), 0, '18', -5),
+      2,
+      '36',
+      2.6,
+    )
+    expect(allocationOf(draft)).toEqual([{ '18': 0 }, {}, { '36': 3 }])
+  })
+})
+
 describe('persistence', () => {
+  it('keeps hand-placed counts, and rejects broken ones', () => {
+    const pinned = edits.setContainerCount(mixed(), 0, 'pallet', 2)
+    expect(parseDraft(JSON.stringify(pinned))?.allocation).toEqual(pinned.allocation)
+    const { allocation: _drop, ...legacy } = mixed()
+    void _drop
+    expect(parseDraft(JSON.stringify(legacy))?.allocation).toBeNull()
+    for (const bad of [
+      { shape: 1, counts: [] },
+      { shape: 'x' },
+      { shape: 'x', counts: [{ a: -1 }] },
+      { shape: 'x', counts: [{ a: 1.5 }] },
+      { shape: 'x', counts: [null] },
+    ]) {
+      expect(parseDraft(JSON.stringify({ ...mixed(), allocation: bad }))).toBeNull()
+    }
+  })
+
   it('round-trips a draft through storage', () => {
     const storage = fakeStorage()
     const draft = edits.setUnit(mixed(), 'cm')

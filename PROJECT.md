@@ -24,7 +24,7 @@ Added on 2026-09-03: container presets and a cabinet catalog with a searchable p
 
 Added on 2026-09-08: the import asks which unit the file's sizes are in and switching units converts every size (sections 2 and 5.7); a custom box can be saved into the catalog and taken back out (section 5.5); the shipped catalog is five placeholders instead of the 174 sample rows, since the real one is loaded from a spreadsheet or built up in the app. Then the 3D view was made to scale to a thousand boxes in a container (section 5.8).
 
-Added on 2026-09-09: two loading modes, Even (the default, spreading the boxes so every container holds close to the same number) and Optimize (the previous behaviour), in sections 4.4 and 5.6.
+Added on 2026-09-09: two loading modes, Even (the default, spreading the boxes so every container holds close to the same number) and Optimize (the previous behaviour), in sections 4.4 and 5.6; and editable per-container counts in the legend (section 5.6).
 
 ## 1. Goals and non-goals
 
@@ -366,6 +366,8 @@ A Loading panel in the sidebar switches between the two modes of section 4.4, wi
 - **Optimize**: "Fills each container as full as it can, so the last one may be nearly empty." `derive()` shows first fit straight away and `src/ui/optimizeClient.ts` starts `packMany` in a Web Worker with a run and time budget, mirroring progress into the status panel ("Optimizing container fill... 120 / 400 runs"). Any edit terminates the worker; the next settled recompute starts a fresh one.
 
 The mode is part of the scenario: it is saved with the draft, written to the Excel Summary sheet as "Loading mode", and read back on import (a workbook from before the modes loads as Even).
+
+The legend counts the boxes of each type in the container on screen, and that count is an input. Lowering it leaves fewer for this container, so the rest move into the ones after it; raising it pulls them back, and the packer still only takes what fits, so a number the container cannot hold quietly settles at its capacity when the field is left. The counts live in `draft.allocation` together with the scenario shape they were typed for (`scenarioShape` in `src/ui/state.ts`): they survive quantity changes and reloads, and are ignored the moment the container, a box size, the unit or the mode changes. "Reset split" next to the container list hands the arrangement back to the mode. In `even` mode a hand-placed count wins over the rule that an even load is not worth an extra container, since the split is then the user's, not the app's.
 
 ### 5.7 Importing an order
 

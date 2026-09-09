@@ -8,6 +8,8 @@ self.onmessage = ({ data }: MessageEvent<OptimizeRequest>) => {
     let reported = -1
     const result = packMany(data.container, data.types, {
       keepUpright: data.keepUpright,
+      mode: data.mode,
+      allocation: data.allocation,
       optimizeRuns: data.optimizeRuns,
       budgetMs: data.budgetMs,
       onProgress: (progress) => {

@@ -1,6 +1,6 @@
 import { DEFAULT_OPTIMIZE_MS, DEFAULT_OPTIMIZE_RUNS, packMany } from '../core'
 import type { OptimizeMessage, OptimizeRequest } from './optimizeProtocol'
-import type { Store } from './state'
+import { allocationOf, type Store } from './state'
 
 export interface AutoOptimizer {
   dispose(): void
@@ -45,6 +45,8 @@ export function startAutoOptimizer(store: Store): AutoOptimizer {
     try {
       const result = packMany(request.container, request.types, {
         keepUpright: request.keepUpright,
+        mode: request.mode,
+        allocation: request.allocation,
         optimizeRuns: request.optimizeRuns,
         budgetMs: request.budgetMs,
       })
@@ -55,13 +57,15 @@ export function startAutoOptimizer(store: Store): AutoOptimizer {
   }
 
   function start(): void {
-    const { derived } = store.get()
+    const { draft, derived } = store.get()
     const scenario = derived.scenario
     if (!scenario) return
     const request: OptimizeRequest = {
       container: scenario.container,
       types: scenario.types,
       keepUpright: scenario.keepUpright,
+      mode: draft.mode,
+      allocation: allocationOf(draft),
       optimizeRuns: DEFAULT_OPTIMIZE_RUNS,
       budgetMs: DEFAULT_OPTIMIZE_MS,
     }
