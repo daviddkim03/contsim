@@ -13,7 +13,8 @@ const dialog = (page: Page) => page.locator('.import-dialog')
 
 /**
  * Example rows: 0 "18" (28), 1 "36" (28), 2 "3036" (42), 3 "2442" (28),
- * 4 "P249624" (14). 140 cabinets, which need two 20 ft containers (62 + 78).
+ * 4 "P249624" (14). 140 cabinets, which need two 20 ft containers: 70 and 70
+ * in the Even mode the app opens with, 62 and 78 when set to Optimize.
  */
 async function setQuantities(page: Page, values: number[]) {
   for (const [i, v] of values.entries()) await qty(page, i).fill(String(v))
@@ -71,9 +72,40 @@ test('opens on the example order, which needs two containers', async ({ page }) 
   await expect(page.locator('.legend-row.short')).toHaveCount(0)
   await expect(page.locator('.container-row')).toHaveCount(2)
   await expect(page.locator('.container-row.selected')).toContainText('Container 1')
+  await expect(page.locator('.container-row').first()).toContainText('70 boxes')
+  await expect(page.locator('.container-row').nth(1)).toContainText('70 boxes')
   await expect(page.locator('.stage-3d canvas')).toBeVisible()
   await expect(progress(page)).toBeHidden()
+  await expect(page.locator('.stage-3d')).toHaveAttribute('data-boxes', '70')
+})
+
+test('the loading mode decides how the boxes are spread, and sticks', async ({ page }) => {
+  const meta = (index: number) => page.locator('.container-row .container-meta').nth(index)
+  /** Waits out the recompute and, in Optimize mode, the worker. */
+  const expectSplit = async (first: string, second: string) => {
+    await expect(meta(0)).toHaveText(first, { timeout: 15_000 })
+    await expect(meta(1)).toHaveText(second, { timeout: 15_000 })
+  }
+  await expect(page.locator('[data-load-mode="even"]')).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.locator('[data-role="mode-hint"]')).toHaveText(
+    'Every container gets close to the same number of boxes.',
+  )
+  await expectSplit('70 boxes · 71.8 %', '70 boxes · 71.8 %')
+
+  await page.locator('[data-load-mode="optimize"]').click()
+  await expect(page.locator('[data-load-mode="optimize"]')).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.locator('[data-role="mode-hint"]')).toContainText('as full as it can')
+  await expectSplit('62 boxes · 86.6 %', '78 boxes · 57.1 %')
   await expect(page.locator('.stage-3d')).toHaveAttribute('data-boxes', '62')
+
+  await page.reload()
+  await expect(page.locator('[data-load-mode="optimize"]')).toHaveAttribute('aria-pressed', 'true')
+  await expectSplit('62 boxes · 86.6 %', '78 boxes · 57.1 %')
+
+  await page.locator('[data-load-mode="even"]').click()
+  await expectSplit('70 boxes · 71.8 %', '70 boxes · 71.8 %')
+  // Both modes place every box; only the split differs.
+  await expect(page.locator('[data-stat="placed"]')).toHaveText('140 / 140')
 })
 
 test('quantities update the result live and survive a reload', async ({ page }) => {
@@ -305,13 +337,13 @@ test('the container switcher and the container list select what the 3D view show
   const label = page.locator('[data-role="container-label"]')
   await expect(progress(page)).toBeHidden()
   await expect(label).toHaveText('Container 1 of 2')
-  await expect(stage).toHaveAttribute('data-boxes', '62')
+  await expect(stage).toHaveAttribute('data-boxes', '70')
   await expect(page.locator('.legend-row').first()).toContainText('in container 1')
 
   await page.locator('[data-action="next-container"]').click()
   await expect(label).toHaveText('Container 2 of 2')
   await expect(stage).toHaveAttribute('data-container', '1')
-  await expect(stage).toHaveAttribute('data-boxes', '78')
+  await expect(stage).toHaveAttribute('data-boxes', '70')
   await expect(page.locator('.container-row.selected')).toContainText('Container 2')
   await expect(page.locator('.legend-row').first()).toContainText('in container 2')
 
@@ -342,14 +374,14 @@ test('the layer slider hides boxes above the chosen height', async ({ page }) =>
   await expect(label).toHaveText('Layer: up to 0 in')
   const floorBoxes = Number(await page.locator('.stage-3d').getAttribute('data-boxes'))
   expect(floorBoxes).toBeGreaterThan(0)
-  expect(floorBoxes).toBeLessThan(62)
+  expect(floorBoxes).toBeLessThan(70)
 
   await slider.evaluate((el: HTMLInputElement) => {
     el.value = el.max
     el.dispatchEvent(new Event('input', { bubbles: true }))
   })
   await expect(label).toHaveText('Layer: all')
-  await expect(page.locator('.stage-3d')).toHaveAttribute('data-boxes', '62')
+  await expect(page.locator('.stage-3d')).toHaveAttribute('data-boxes', '70')
 })
 
 test('hovering a legend or sidebar row highlights that box type', async ({ page }) => {
@@ -365,7 +397,8 @@ test('hovering a legend or sidebar row highlights that box type', async ({ page 
 test('the optimizer runs by itself after an edit and the result stays consistent', async ({
   page,
 }) => {
-  await expect(progress(page)).toBeHidden()
+  await page.locator('[data-load-mode="optimize"]').click()
+  await expect(progress(page)).toBeHidden({ timeout: 15_000 })
   await qty(page, 2).fill('60')
   await expect(page.locator('.status')).not.toHaveClass(/stale/)
   await expect(progress(page)).toBeHidden({ timeout: 15_000 })
@@ -383,6 +416,7 @@ test('the Excel export imports back: order, container, unit and upright setting'
 }) => {
   await page.locator('[data-field="containerType"]').selectOption('40ft-hc')
   await page.locator('[data-field="keepUpright"]').check()
+  await page.locator('[data-load-mode="optimize"]').click()
   await expect(badge(page)).toHaveText('Fits')
   const downloadPromise = page.waitForEvent('download')
   await page.locator('[data-action="export-excel"]').click()
@@ -390,6 +424,7 @@ test('the Excel export imports back: order, container, unit and upright setting'
 
   await page.locator('[data-field="containerType"]').selectOption('20ft')
   await page.locator('[data-field="keepUpright"]').uncheck()
+  await page.locator('[data-load-mode="even"]').click()
   await qty(page, 0).fill('3')
   await row(page, 4).locator('[data-action="remove"]').click()
   await expect(page.locator('.box-row')).toHaveCount(4)
@@ -408,6 +443,7 @@ test('the Excel export imports back: order, container, unit and upright setting'
   await expect(qty(page, 0)).toHaveValue('28')
   await expect(page.locator('[data-field="containerType"]')).toHaveValue('40ft-hc')
   await expect(page.locator('[data-field="keepUpright"]')).toBeChecked()
+  await expect(page.locator('[data-load-mode="optimize"]')).toHaveAttribute('aria-pressed', 'true')
   await expect(badge(page)).toHaveText('Fits')
   // The message stays until the next change.
   await expect(hint(page)).toContainText('Imported 5 rows')
@@ -515,11 +551,12 @@ test('Export Excel downloads a workbook with summary, containers, boxes and plac
   expect(summary).toContainEqual(['Container type', '20 ft'])
   expect(summary).toContainEqual(['Container length (in)', 232.2])
   expect(summary).toContainEqual(['Containers needed', 2])
+  expect(summary).toContainEqual(['Loading mode', 'Even'])
   expect(summary).toContainEqual(['Boxes placed', 140])
   const containers = readSheet(text(parts.get('xl/worksheets/sheet2.xml')!))
   expect(containers).toHaveLength(3)
-  expect(containers[1]!.slice(0, 2)).toEqual([1, 62])
-  expect(containers[2]!.slice(0, 2)).toEqual([2, 78])
+  expect(containers[1]!.slice(0, 2)).toEqual([1, 70])
+  expect(containers[2]!.slice(0, 2)).toEqual([2, 70])
   const boxes = readSheet(text(parts.get('xl/worksheets/sheet3.xml')!))
   expect(boxes).toHaveLength(6)
   expect(boxes[1]!.slice(1, 9)).toEqual(['18', '#f59e0b', 18, 24, 34.5, 28, 28, 0])

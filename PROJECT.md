@@ -22,7 +22,9 @@ Added on 2026-09-02: Export Excel (a dependency-free .xlsx writer, section 5.4) 
 
 Added on 2026-09-03: container presets and a cabinet catalog with a searchable picker (section 5.5), and packing into as many containers as the order needs with automatic background optimization (sections 4.4 and 5.6). The Optimize button, its objectives and the Apply / Discard popover are gone; the optimizer's job is now to fill each container as densely as possible. Later the same day: Excel import of an order, with a template and a guide, replacing JSON import and export (section 5.7); the Excel export imports back.
 
-Added on 2026-09-08: the import asks which unit the file's sizes are in and switching units converts every size (sections 2 and 5.7); a custom box can be saved into the catalog and taken back out (section 5.5); the shipped catalog is five placeholders instead of the 174 sample rows, since the real one is loaded from a spreadsheet or built up in the app.
+Added on 2026-09-08: the import asks which unit the file's sizes are in and switching units converts every size (sections 2 and 5.7); a custom box can be saved into the catalog and taken back out (section 5.5); the shipped catalog is five placeholders instead of the 174 sample rows, since the real one is loaded from a spreadsheet or built up in the app. Then the 3D view was made to scale to a thousand boxes in a container (section 5.8).
+
+Added on 2026-09-09: two loading modes, Even (the default, spreading the boxes so every container holds close to the same number) and Optimize (the previous behaviour), in sections 4.4 and 5.6.
 
 ## 1. Goals and non-goals
 
@@ -281,9 +283,14 @@ Notes:
 
 `packMany(container, types, opts)` fills containers of one size one after another: each container gets what the packer can place from what is left, and the remainder moves on to a fresh container, up to a cap (50). Every packable type fits in an empty container, so the loop always terminates with everything placed; a type that fits in no container in any allowed orientation is reported up front (`status: 'impossible'`, `impossibility: { kind: 'oversize' }`) and everything else is still packed.
 
-With `optimizeRuns > 0` each container instead receives the largest-volume subset that `optimize()` (section 4.3, objective keep-most-volume) can fit within the remaining run budget, which is shared across containers; when the budget runs out, later containers fall back to a single first-fit run. The result is deterministic either way. `onProgress` reports runs and finished containers and can stop the optimizing early, still returning a complete packing.
+Two modes decide how the load is spread, both deterministic.
 
-The UI runs the plain variant synchronously in `derive()` (a few milliseconds) for instant feedback and the budgeted variant in a worker; `shownResult()` shows the worker's packing once it is in, unless it needs more containers or places fewer boxes, which greedy per-container filling can in principle do.
+- `mode: 'even'` (what the app opens with) spreads it. A first pass fills containers one at a time only to learn how many are needed; a second pass then hands each container `evenShare` of what is left: an equal slice of every type, whole boxes dealt out by largest remainder, so the containers end up with close to the same box count and the same mix. Anything a container cannot take rolls forward, so a tight fit shifts a few boxes later rather than failing. If the spread ends up needing more containers than plain filling did, the plain result is kept: an even load is not worth an extra container. It costs two passes, about twice a plain filling and far less than optimizing, so the UI runs it synchronously in `derive()` and there is nothing to wait for.
+- `mode: 'optimize'` fills each container as full as it can before opening the next. With `optimizeRuns > 0` each container receives the largest-volume subset that `optimize()` (section 4.3, objective keep-most-volume) can fit within the remaining run and time budget, which is shared across containers; when either runs out, the rest fall back to a single first-fit run. `onProgress` reports runs and finished containers and can stop the optimizing early, still returning a complete packing.
+
+In `optimize` mode the UI runs the plain variant synchronously in `derive()` (a few milliseconds) for instant feedback and the budgeted variant in a worker; `shownResult()` shows the worker's packing once it is in, unless it needs more containers or places fewer boxes, which greedy per-container filling can in principle do.
+
+Measured on the example order (140 cabinets, 20 ft): plain filling gives 62 and 78 boxes at 87 % and 57 % fill in 3 ms, even gives 70 and 70 at 72 % each in 6 ms, and optimizing confirms the plain split in 35 ms. On 1,300 small boxes over three containers: plain 393 / 898 / 9, even 434 / 433 / 433.
 
 ## 5. UI
 
@@ -349,11 +356,16 @@ The row's text input is a combobox (`src/ui/combobox.ts`): typing filters by cod
 
 The star on a custom row saves it into the catalog under its name (converted to inches), which turns the row into a catalog row; the star on a saved cabinet takes it back out and returns every row using it to a custom box with the same size. A name that is taken, or a box without a size, is refused with a message.
 
-### 5.6 Many containers and automatic optimization
+### 5.6 Many containers, and the two loading modes
 
 The status badge reads Fits (one container), "N containers" (blue), Impossible (a type that fits in no container; the rest is still packed and the badge's details say so), Too many (container cap), or Fix inputs. The side panel lists the containers with box counts and fill bars; clicking one, or the "Container 1 of N" switcher in the toolbar, selects what the 3D view shows. The legend shows placed / requested per type plus how many are in the selected container. The table lists every placement with its container number, and the Excel export gains a Containers sheet and a Container column.
 
-Whenever a fresh first-fit result needs more than one container, `src/ui/optimizeClient.ts` starts `packMany` with a 400-run budget in a Web Worker and mirrors progress into the status panel ("Optimizing container fill... 120 / 400 runs"). Any edit terminates the worker; the next settled recompute starts a fresh one. Measured on the example order (150 cabinets, 20 ft): first fit needs 2 containers at 88 % and 65 % fill, the optimizer confirms it in about 50 ms.
+A Loading panel in the sidebar switches between the two modes of section 4.4, with a line under it saying what the chosen one does:
+
+- **Even** (the default): "Every container gets close to the same number of boxes." Computed in `derive()`, so the answer is on screen as soon as the inputs settle and no worker runs.
+- **Optimize**: "Fills each container as full as it can, so the last one may be nearly empty." `derive()` shows first fit straight away and `src/ui/optimizeClient.ts` starts `packMany` in a Web Worker with a run and time budget, mirroring progress into the status panel ("Optimizing container fill... 120 / 400 runs"). Any edit terminates the worker; the next settled recompute starts a fresh one.
+
+The mode is part of the scenario: it is saved with the draft, written to the Excel Summary sheet as "Loading mode", and read back on import (a workbook from before the modes loads as Even).
 
 ### 5.7 Importing an order
 
@@ -401,7 +413,7 @@ contsim/
       validate.ts         structural validation (MAX_DIM, MAX_QTY), reports every issue
       packer.ts           extreme-point packer (4.2)
       optimizer.ts        multi-start + add-back (4.3)
-      multi.ts            as many containers as needed, optionally optimized (4.4)
+      multi.ts            as many containers as needed, evened out or optimized (4.4)
       ordering.ts         orderings + seeded PRNG
       index.ts
     catalog.ts            generated cabinet catalog (npm run catalog); do not edit

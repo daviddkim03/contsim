@@ -77,6 +77,7 @@ export function buildReport(state: AppState, now: Date = new Date()): Workbook |
     [lengthHeader('Container height'), length(scenario.container.h)],
     [volumeHeader('Container volume, each'), volume(containerVolume)],
     ['Keep boxes upright', scenario.keepUpright ? 'Yes' : 'No'],
+    ['Loading mode', draft.mode === 'even' ? 'Even' : 'Optimize'],
     ['Containers needed', count],
     ['Boxes requested', requested],
     ['Boxes placed', placed],

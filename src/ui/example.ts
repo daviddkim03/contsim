@@ -19,6 +19,7 @@ const ORDER: [code: string, qty: number][] = [
 export function exampleDraft(): Draft {
   return {
     containerType: '20ft',
+    mode: 'even',
     // The 20 ft preset in inches, so switching to Custom starts from a real container.
     container: { l: '232.2', w: '92.6', h: '94.2' },
     keepUpright: false,

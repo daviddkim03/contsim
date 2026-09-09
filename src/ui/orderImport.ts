@@ -8,6 +8,7 @@
  */
 
 import type { CatalogItem } from '../catalog'
+import type { LoadMode } from '../core'
 import { catalogTexts } from './catalogSearch'
 import { findCatalogItem } from './catalogStore'
 import { nextColor } from './palette'
@@ -292,7 +293,12 @@ export function readSummary(rows: Row[], fallbackUnit: Unit): Summary | null {
   if (!typeName) return null
   const preset = CONTAINER_PRESETS.find((p) => p.name.toLowerCase() === typeName)
   const keepUpright = cellText(values.get('keep boxes upright')).toLowerCase() === 'yes'
-  if (preset) return { container: { containerType: preset.id, container: null, keepUpright }, unit }
+  // Written since 2026-09-09; an older workbook gets the app's default.
+  const mode: LoadMode =
+    cellText(values.get('loading mode')).toLowerCase() === 'optimize' ? 'optimize' : 'even'
+  if (preset) {
+    return { container: { containerType: preset.id, container: null, keepUpright, mode }, unit }
+  }
 
   const dims = ['length', 'width', 'height'].map((side) => {
     const entry = [...values.entries()].find(([k]) => k.startsWith(`container ${side}`))
@@ -305,6 +311,7 @@ export function readSummary(rows: Row[], fallbackUnit: Unit): Summary | null {
       containerType: 'custom',
       container: { l: dims[0], w: dims[1], h: dims[2] },
       keepUpright,
+      mode,
     },
     unit,
   }

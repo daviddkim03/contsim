@@ -1,15 +1,18 @@
 /**
- * Packing into as many containers of one size as it takes.
+ * Packing into as many containers of one size as it takes, in one of two
+ * modes (PROJECT.md section 4.4).
  *
- * Containers are filled one after another: each gets the boxes the packer
- * can place from what is left, and the remainder moves on to a fresh
- * container. With an optimizer budget, each container instead gets the
- * largest-volume subset the optimizer can fit (PROJECT.md section 4.3), which
- * usually saves a container on realistic loads. Both paths are deterministic.
+ * - 'even' spreads the load: it first sees how many containers are needed,
+ *   then gives each one its share of every box type, so the containers hold
+ *   close to the same number of boxes. It never uses more containers than
+ *   filling them one at a time would.
+ * - 'optimize' fills each container as full as it can before opening the
+ *   next, with the optimizer (section 4.3) when it is given a budget. The
+ *   last container is then often nearly empty.
  *
- * A box type that fits in no container in any allowed orientation can never
- * ship in this container size; the result says so (status 'impossible') and
- * still packs everything else.
+ * Both are deterministic. A box type that fits in no container in any allowed
+ * orientation can never ship in this container size; the result says so
+ * (status 'impossible') and still packs everything else.
  */
 
 import { insideContainer, orientations, volume } from './geometry'
@@ -17,6 +20,9 @@ import { optimize } from './optimizer'
 import { pack } from './packer'
 import type { BoxType, Container, Impossibility, PackResult } from './types'
 import { validateScenario } from './validate'
+
+/** How the boxes are spread over the containers; see the note at the top. */
+export type LoadMode = 'even' | 'optimize'
 
 export type MultiStatus = 'fits' | 'impossible' | 'limit'
 
@@ -61,11 +67,14 @@ export interface MultiPackProgress {
 
 export interface MultiPackOptions {
   keepUpright: boolean
+  /** Default 'optimize', which is what the packer did before modes existed. */
+  mode?: LoadMode
   /** Never open more than this many containers. Default 50. */
   maxContainers?: number
   /**
-   * Packer-run budget for the optimizer across all containers. 0 (default)
-   * packs every container once, first fit; that takes a few milliseconds.
+   * Packer-run budget for the optimizer across all containers, in 'optimize'
+   * mode. 0 (default) packs every container once, first fit; that takes a few
+   * milliseconds. 'even' mode never optimizes and ignores this.
    */
   optimizeRuns?: number
   /**
@@ -99,6 +108,42 @@ function asOwnPacking(result: PackResult): PackResult {
   }
 }
 
+/**
+ * One container's share of what is left, so that every container ends up with
+ * about the same number of boxes and the same mix of types. Whole boxes are
+ * handed out by largest remainder, which keeps the split deterministic.
+ */
+export function evenShare(
+  types: readonly BoxType[],
+  remaining: Quantities,
+  containersLeft: number,
+): Quantities {
+  const total = sum(remaining)
+  const share: Quantities = {}
+  if (containersLeft <= 1 || total === 0) {
+    for (const t of types) share[t.id] = remaining[t.id] ?? 0
+    return share
+  }
+  const target = Math.ceil(total / containersLeft)
+  const parts: { id: string; fraction: number }[] = []
+  let given = 0
+  for (const t of types) {
+    const have = remaining[t.id] ?? 0
+    const exact = (have * target) / total
+    const whole = Math.floor(exact)
+    share[t.id] = whole
+    given += whole
+    if (whole < have) parts.push({ id: t.id, fraction: exact - whole })
+  }
+  parts.sort((a, b) => b.fraction - a.fraction)
+  for (const part of parts) {
+    if (given >= target) break
+    share[part.id]!++
+    given++
+  }
+  return share
+}
+
 export function packMany(
   container: Container,
   types: BoxType[],
@@ -110,6 +155,7 @@ export function packMany(
     const detail = issues.map((i) => `${i.path} ${i.message}`).join('; ')
     throw new Error(`Invalid scenario: ${detail}`)
   }
+  const mode = options.mode ?? 'optimize'
   const maxContainers = options.maxContainers ?? DEFAULT_MAX_CONTAINERS
   const maxRuns = options.optimizeRuns ?? 0
   const budgetMs = options.budgetMs ?? DEFAULT_OPTIMIZE_MS
@@ -132,28 +178,23 @@ export function packMany(
     }
   }
 
-  const remaining: Quantities = Object.fromEntries(packable.map((t) => [t.id, t.qty]))
-  const containers: PackResult[] = []
+  const requestedOf: Quantities = Object.fromEntries(packable.map((t) => [t.id, t.qty]))
   let runs = 0
-  let placed = 0
-  let optimizing = maxRuns > 0
+  let optimizing = mode === 'optimize' && maxRuns > 0
 
-  const report = (): boolean => {
+  const report = (containersDone: number, placed: number): boolean => {
     const go = options.onProgress?.({
       runs,
       maxRuns,
-      containers: containers.length,
+      containers: containersDone,
       placed,
       requested,
     })
     return go !== false
   }
 
-  while (sum(remaining) > 0 && containers.length < maxContainers) {
-    const subset = packable
-      .filter((t) => remaining[t.id]! > 0)
-      .map((t) => ({ ...t, qty: remaining[t.id]! }))
-    let result: PackResult
+  /** Packs what it can of `subset` into one container. */
+  function fillOne(subset: BoxType[], containersDone: number, placed: number): PackResult {
     if (optimizing && runs < maxRuns) {
       const before = runs
       const r = optimize(container, subset, {
@@ -163,30 +204,66 @@ export function packMany(
         onProgress: (p) => {
           runs = before + p.runs
           if (performance.now() - start > budgetMs) optimizing = false
-          if (!report()) optimizing = false
+          if (!report(containersDone, placed)) optimizing = false
           return optimizing
         },
       })
       runs = before + r.runs
-      result = r.result
-    } else {
-      // skipChecks: what is left may well exceed one container; that is the point.
-      result = asOwnPacking(
-        pack(container, subset, { keepUpright: options.keepUpright, skipChecks: true }),
-      )
-      runs++
+      return r.result
     }
-    // Every packable type fits in an empty container, so this cannot trigger; never loop forever.
-    if (result.placements.length === 0) break
-    containers.push(result)
-    for (const p of result.placements) remaining[p.typeId]!--
-    placed += result.placements.length
+    runs++
+    // skipChecks: what is left may well exceed one container; that is the point.
+    return asOwnPacking(
+      pack(container, subset, { keepUpright: options.keepUpright, skipChecks: true }),
+    )
+  }
+
+  /** Fills containers one after another; `shareFor` says what to offer each one. */
+  function fillAll(
+    shareFor: (left: Quantities, containersDone: number) => Quantities,
+  ): PackResult[] {
+    const remaining = { ...requestedOf }
+    const filled: PackResult[] = []
+    let placed = 0
+    while (sum(remaining) > 0 && filled.length < maxContainers) {
+      const share = shareFor(remaining, filled.length)
+      const subset = packable
+        .filter((t) => (share[t.id] ?? 0) > 0)
+        .map((t) => ({ ...t, qty: share[t.id]! }))
+      const result = fillOne(subset, filled.length, placed)
+      // Every packable type fits in an empty container, so this cannot trigger;
+      // it only guards against looping forever.
+      if (result.placements.length === 0) break
+      filled.push(result)
+      for (const p of result.placements) remaining[p.typeId]!--
+      placed += result.placements.length
+    }
+    return filled
+  }
+
+  const everything = (left: Quantities) => left
+  let containers = fillAll(everything)
+  if (mode === 'even' && containers.length > 1) {
+    // Now that the container count is known, hand each one its share. An even
+    // load is not worth an extra container, so a wider spread is turned down.
+    const target = containers.length
+    const spread = fillAll((left, done) => evenShare(packable, left, Math.max(1, target - done)))
+    if (spread.length <= containers.length) containers = spread
+  }
+
+  const placedOf: Quantities = { ...requestedOf }
+  let placed = 0
+  for (const c of containers) {
+    for (const p of c.placements) {
+      placedOf[p.typeId]!--
+      placed++
+    }
   }
 
   let status: MultiStatus = impossibility ? 'impossible' : 'fits'
-  if (sum(remaining) > 0) {
+  if (placed < sum(requestedOf)) {
     status = 'limit'
-    for (const [id, n] of Object.entries(remaining)) if (n > 0) unplaced[id] = n
+    for (const [id, n] of Object.entries(placedOf)) if (n > 0) unplaced[id] = n
   }
   const placedVolume = containers.reduce((v, c) => v + c.stats.placedVolume, 0)
   return {

@@ -161,6 +161,7 @@ describe('importWorkbook', () => {
       containerType: '40ft-hc',
       container: null,
       keepUpright: true,
+      mode: 'even',
     })
     expect(r.imported.unit).toBe('cm')
     expect(r.imported.types.map((t) => [t.kind, t.catalogCode, t.qty, t.color])).toEqual(
@@ -189,6 +190,7 @@ describe('importWorkbook', () => {
       containerType: 'custom',
       container: { l: '232.2', w: '92.6', h: '94.2' },
       keepUpright: false,
+      mode: 'even',
     })
     expect(r.imported.unit).toBe('in')
     expect(r.imported.types.at(-1)).toMatchObject({
@@ -213,18 +215,19 @@ describe('importWorkbook', () => {
 })
 
 describe('readSummary', () => {
-  it('names a preset, or gives custom dimensions, with unit and upright', () => {
+  it('names a preset, or gives custom dimensions, with unit, upright and mode', () => {
     expect(
       readSummary(
         [
           ['Unit', 'mm'],
           ['Container type', '20 ft high cube'],
           ['Keep boxes upright', 'Yes'],
+          ['Loading mode', 'Optimize'],
         ],
         'in',
       ),
     ).toEqual({
-      container: { containerType: '20ft-hc', container: null, keepUpright: true },
+      container: { containerType: '20ft-hc', container: null, keepUpright: true, mode: 'optimize' },
       unit: 'mm',
     })
     expect(
@@ -243,6 +246,8 @@ describe('readSummary', () => {
         containerType: 'custom',
         container: { l: '100', w: '50', h: '40.5' },
         keepUpright: false,
+        // A workbook from before the modes existed loads as Even, the default.
+        mode: 'even',
       },
       unit: 'in',
     })

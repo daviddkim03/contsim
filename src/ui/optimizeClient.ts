@@ -87,10 +87,15 @@ export function startAutoOptimizer(store: Store): AutoOptimizer {
     worker.postMessage(request)
   }
 
-  /** Worth a run: the inputs are settled and first fit needed more than one container. */
+  /**
+   * Worth a run: the load is being optimized rather than evened out, the
+   * inputs are settled, and first fit needed more than one container. Evening
+   * out is finished by the time it reaches the screen, so nothing to do.
+   */
   function pending(): boolean {
-    const { derived, optimize } = store.get()
+    const { draft, derived, optimize } = store.get()
     return (
+      draft.mode === 'optimize' &&
       !derived.stale &&
       optimize.status === 'idle' &&
       derived.result !== null &&

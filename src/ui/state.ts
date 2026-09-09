@@ -3,6 +3,7 @@ import {
   validateScenario,
   type BoxType,
   type Container,
+  type LoadMode,
   type MultiPackResult,
   type PackResult,
   type Scenario,
@@ -32,6 +33,7 @@ export interface BoxTypeDraft {
 }
 
 export const BOX_KINDS: readonly BoxKind[] = ['catalog', 'custom']
+export const LOAD_MODES: readonly LoadMode[] = ['even', 'optimize']
 
 /** What an imported spreadsheet contributes: box rows, and container settings when the file has them. */
 export interface ScenarioImport {
@@ -43,12 +45,15 @@ export interface ScenarioImport {
     /** Custom interior size in `unit`; null when the file names a preset. */
     container: { l: string; w: string; h: string } | null
     keepUpright: boolean
+    mode: LoadMode
   } | null
 }
 
 export interface Draft {
   /** A standard container, or 'custom' to use the typed dimensions below. */
   containerType: ContainerType
+  /** How the boxes are spread over the containers. */
+  mode: LoadMode
   /** Custom interior dimensions. Kept while a preset is selected, so switching back restores them. */
   container: { l: string; w: string; h: string }
   types: BoxTypeDraft[]
@@ -152,6 +157,7 @@ export function draftFromScenario(scenario: Scenario, unit: Unit): Draft {
   const s = (n: number) => String(n)
   return {
     containerType: 'custom',
+    mode: 'even',
     container: {
       l: s(scenario.container.l),
       w: s(scenario.container.w),
@@ -252,7 +258,9 @@ export function derive(draft: Draft): Derived {
   }
 
   const scenario: Scenario = { container, types, keepUpright: draft.keepUpright }
-  const result = packMany(container, types, { keepUpright: draft.keepUpright })
+  // In 'even' mode this is the finished answer; in 'optimize' mode it is first
+  // fit, which the worker then improves on (src/ui/optimizeClient.ts).
+  const result = packMany(container, types, { keepUpright: draft.keepUpright, mode: draft.mode })
   return { scale, issues, scenario, result, stale: false }
 }
 
@@ -292,6 +300,9 @@ export const edits = {
    * numbers convert; catalog rows are recomputed from the catalog, which is
    * exact.
    */
+  setMode(draft: Draft, mode: LoadMode): Draft {
+    return mode === draft.mode ? draft : { ...draft, mode }
+  },
   setUnit(draft: Draft, unit: Unit): Draft {
     if (unit === draft.unit) return draft
     const convert = (text: string): string => {
@@ -396,6 +407,7 @@ export const edits = {
             containerType: c.containerType,
             container: c.container ?? converted.container,
             keepUpright: c.keepUpright,
+            mode: c.mode,
           }
         : {}),
     }
@@ -432,6 +444,9 @@ export function parseDraft(json: string): Draft | null {
     // Drafts saved before container presets existed have no type: they are custom.
     const containerType = d.containerType === undefined ? 'custom' : d.containerType
     if (!CONTAINER_TYPES.includes(containerType as ContainerType)) return null
+    // Drafts saved before the modes existed get the default, like a new one.
+    const mode = d.mode === undefined ? 'even' : d.mode
+    if (!LOAD_MODES.includes(mode as LoadMode)) return null
     const types: BoxTypeDraft[] = []
     for (const t of d.types as unknown[]) {
       const r = t as Record<string, unknown>
@@ -456,6 +471,7 @@ export function parseDraft(json: string): Draft | null {
     }
     return {
       containerType: containerType as ContainerType,
+      mode: mode as LoadMode,
       container: { l: c.l, w: c.w, h: c.h },
       types,
       keepUpright: d.keepUpright === true,

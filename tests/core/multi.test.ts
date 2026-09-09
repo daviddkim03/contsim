@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { packMany, type MultiPackProgress, type MultiPackResult } from '../../src/core/multi'
+import {
+  evenShare,
+  packMany,
+  type MultiPackProgress,
+  type MultiPackResult,
+} from '../../src/core/multi'
 import { mulberry32 } from '../../src/core/ordering'
 import { pack } from '../../src/core/packer'
 import type { Scenario } from '../../src/core/types'
@@ -180,6 +185,73 @@ describe('packMany', () => {
     expect(r.runs).toBeLessThan(60)
   })
 
+  it('spreads the boxes evenly when asked, over the same containers', () => {
+    const s = exampleScenario()
+    const filled = run(s)
+    const even = packMany(s.container, s.types, { keepUpright: false, mode: 'even' })
+    const counts = (r: MultiPackResult) => r.containers.map((c) => c.placements.length)
+    // Filling one container at a time leaves the last one nearly empty; evening does not.
+    expect(counts(filled)).toEqual([123, 15])
+    expect(counts(even)).toEqual([69, 69])
+    expect(even.status).toBe('fits')
+    expect(even.stats.placed).toBe(138)
+    expect(multiViolation(s, even)).toBeNull()
+  })
+
+  it('gives every container the same mix of types, not just the same count', () => {
+    const s = exampleScenario()
+    const even = packMany(s.container, s.types, { keepUpright: false, mode: 'even' })
+    for (const t of s.types) {
+      const perContainer = even.containers.map(
+        (c) => c.placements.filter((p) => p.typeId === t.id).length,
+      )
+      // Each container holds within one box of an equal share of every type.
+      const share = t.qty / even.containers.length
+      for (const n of perContainer) expect(Math.abs(n - share)).toBeLessThanOrEqual(1)
+    }
+  })
+
+  it('leaves a single container alone, and never opens an extra one to even out', () => {
+    const single = packMany(mixedScenario().container, mixedScenario().types, {
+      keepUpright: false,
+      mode: 'even',
+    })
+    expect(single.containers).toHaveLength(1)
+    expect(single.runs).toBe(1)
+
+    const random = mulberry32(11)
+    const int = (lo: number, hi: number) => lo + Math.floor(random() * (hi - lo + 1))
+    for (let i = 0; i < 40; i++) {
+      const container = { l: int(5, 30), w: int(5, 30), h: int(5, 30) }
+      const types = Array.from({ length: int(1, 4) }, (_, k) =>
+        boxType(`t${k}`, int(1, 20), int(1, 20), int(1, 20), int(1, 12)),
+      )
+      const scenario: Scenario = { container, types, keepUpright: random() < 0.3 }
+      const filled = run(scenario)
+      const even = packMany(container, types, { keepUpright: scenario.keepUpright, mode: 'even' })
+      expect(multiViolation(scenario, even)).toBeNull()
+      expect(even.containers.length).toBeLessThanOrEqual(filled.containers.length)
+      expect(even.stats.placed).toBe(filled.stats.placed)
+    }
+  })
+
+  it('evens out without the optimizer, and is deterministic', () => {
+    const s = exampleScenario()
+    const a = packMany(s.container, s.types, {
+      keepUpright: false,
+      mode: 'even',
+      optimizeRuns: 400,
+    })
+    const b = packMany(s.container, s.types, {
+      keepUpright: false,
+      mode: 'even',
+      optimizeRuns: 400,
+    })
+    // Two passes over two containers; the optimizer never runs.
+    expect(a.runs).toBe(4)
+    expect(b.containers.map((c) => c.placements)).toEqual(a.containers.map((c) => c.placements))
+  })
+
   it('keeps every invariant on random scenarios', () => {
     const random = mulberry32(7)
     const int = (lo: number, hi: number) => lo + Math.floor(random() * (hi - lo + 1))
@@ -201,5 +273,45 @@ describe('packMany', () => {
     expect(r.containers).toHaveLength(1)
     expect(r.runs).toBe(1)
     expect(r.containers[0]!.placements).toEqual(pack(s.container, s.types).placements)
+  })
+})
+
+describe('evenShare', () => {
+  const types = [boxType('a', 1, 1, 1, 0), boxType('b', 1, 1, 1, 0), boxType('c', 1, 1, 1, 0)]
+
+  it('splits what is left into equal shares of every type', () => {
+    expect(evenShare(types, { a: 10, b: 10, c: 10 }, 2)).toEqual({ a: 5, b: 5, c: 5 })
+    expect(evenShare(types, { a: 30, b: 0, c: 0 }, 3)).toEqual({ a: 10, b: 0, c: 0 })
+  })
+
+  it('hands out the odd boxes by largest remainder, one each', () => {
+    const share = evenShare(types, { a: 1, b: 1, c: 1 }, 2)
+    expect(Object.values(share).reduce((x, y) => x + y)).toBe(2)
+    expect(Object.values(share).every((n) => n <= 1)).toBe(true)
+    // 7 boxes over 2 containers: 4 here, and a takes the larger remainder.
+    expect(evenShare(types, { a: 5, b: 1, c: 1 }, 2)).toEqual({ a: 3, b: 1, c: 0 })
+  })
+
+  it('gives the last container everything that is left', () => {
+    expect(evenShare(types, { a: 3, b: 2, c: 0 }, 1)).toEqual({ a: 3, b: 2, c: 0 })
+    expect(evenShare(types, { a: 3, b: 2, c: 0 }, 0)).toEqual({ a: 3, b: 2, c: 0 })
+  })
+
+  it('never hands out more of a type than is left, or more than the share', () => {
+    const random = mulberry32(3)
+    for (let i = 0; i < 200; i++) {
+      const remaining = {
+        a: Math.floor(random() * 40),
+        b: Math.floor(random() * 40),
+        c: Math.floor(random() * 40),
+      }
+      const left = 1 + Math.floor(random() * 5)
+      const share = evenShare(types, remaining, left)
+      const total = remaining.a + remaining.b + remaining.c
+      const given = share.a! + share.b! + share.c!
+      for (const id of ['a', 'b', 'c'] as const)
+        expect(share[id]!).toBeLessThanOrEqual(remaining[id])
+      expect(given).toBe(left <= 1 ? total : Math.min(total, Math.ceil(total / left)))
+    }
   })
 })

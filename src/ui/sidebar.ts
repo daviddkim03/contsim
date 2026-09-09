@@ -1,3 +1,4 @@
+import type { LoadMode } from '../core'
 import { formatCatalogDims, searchCatalog } from './catalogSearch'
 import {
   addUserCatalogItem,
@@ -38,6 +39,14 @@ export interface Panel {
 }
 
 const CONTAINER_KEYS: ContainerKey[] = ['l', 'w', 'h']
+const LOAD_MODE_LABELS: [LoadMode, string][] = [
+  ['even', 'Even'],
+  ['optimize', 'Optimize'],
+]
+const LOAD_MODE_HINTS: Record<LoadMode, string> = {
+  even: 'Every container gets close to the same number of boxes.',
+  optimize: 'Fills each container as full as it can, so the last one may be nearly empty.',
+}
 const TYPE_FIELDS: TypeField[] = ['name', 'l', 'w', 'h', 'qty']
 const DIM_FIELDS: TypeField[] = ['l', 'w', 'h']
 /** Option id of the "Custom size" entry at the end of every catalog search. */
@@ -84,6 +93,11 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
     </section>
 
     <section class="panel">
+      <div class="panel-title"><h2>Loading</h2></div>
+      <div class="segmented" role="group" aria-label="Loading mode">
+        ${LOAD_MODE_LABELS.map(([value, label]) => `<button type="button" data-load-mode="${value}">${label}</button>`).join('')}
+      </div>
+      <p class="hint" data-role="mode-hint"></p>
       <label class="check">
         <input type="checkbox" data-field="keepUpright">
         <span>Keep boxes upright</span>
@@ -109,6 +123,8 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
   const containerTypeSelect = query<HTMLSelectElement>(root, '[data-field="containerType"]')
   const containerHint = query<HTMLElement>(root, '[data-role="container-hint"]')
   const uprightCheckbox = query<HTMLInputElement>(root, '[data-field="keepUpright"]')
+  const modeButtons = root.querySelectorAll<HTMLButtonElement>('[data-load-mode]')
+  const modeHint = query<HTMLElement>(root, '[data-role="mode-hint"]')
   const list = query<HTMLUListElement>(root, '.box-list')
   const empty = query<HTMLElement>(root, '.empty')
   const importInput = query<HTMLInputElement>(root, '[data-field="import-file"]')
@@ -152,6 +168,12 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
     }
     if (target === importInput) void importFile(importInput.files?.[0])
   })
+
+  for (const button of modeButtons) {
+    button.addEventListener('click', () => {
+      store.edit((d) => edits.setMode(d, button.dataset.loadMode as LoadMode))
+    })
+  }
 
   root.addEventListener('click', (event) => {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-action]')
@@ -453,6 +475,12 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
     )
     setValue(unitSelect, draft.unit)
     uprightCheckbox.checked = draft.keepUpright
+    for (const button of modeButtons) {
+      const on = button.dataset.loadMode === draft.mode
+      button.classList.toggle('active', on)
+      button.setAttribute('aria-pressed', on ? 'true' : 'false')
+    }
+    setText(modeHint, LOAD_MODE_HINTS[draft.mode])
 
     const existing = new Map<string, HTMLLIElement>()
     for (const li of list.querySelectorAll<HTMLLIElement>('li[data-id]')) {

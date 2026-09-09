@@ -72,6 +72,7 @@ describe('derive', () => {
   it('never throws on garbage input', () => {
     const draft: Draft = {
       containerType: 'custom',
+      mode: 'even',
       container: { l: '', w: '-', h: '9'.repeat(30) },
       types: [
         {
@@ -254,9 +255,14 @@ describe('edits', () => {
     const preset = edits.applyImport(draft, {
       types,
       unit: 'mm',
-      container: { containerType: '40ft', container: null, keepUpright: true },
+      container: { containerType: '40ft', container: null, keepUpright: true, mode: 'optimize' },
     })
-    expect(preset).toMatchObject({ containerType: '40ft', unit: 'mm', keepUpright: true })
+    expect(preset).toMatchObject({
+      containerType: '40ft',
+      unit: 'mm',
+      keepUpright: true,
+      mode: 'optimize',
+    })
 
     const custom = edits.applyImport(draft, {
       types,
@@ -265,6 +271,7 @@ describe('edits', () => {
         containerType: 'custom',
         container: { l: '1', w: '2', h: '3' },
         keepUpright: false,
+        mode: 'even',
       },
     })
     expect(custom.container).toEqual({ l: '1', w: '2', h: '3' })

@@ -1040,6 +1040,36 @@ button.primary:disabled {
   gap: 2px;
 }
 
+/* The loading mode, in the sidebar's colours rather than the stage's. */
+.sidebar .segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  width: 100%;
+  border-color: var(--sidebar-input-border);
+  background: var(--sidebar-input);
+}
+
+.sidebar .segmented button {
+  padding: 6px 10px;
+  color: var(--sidebar-muted);
+  font: inherit;
+}
+
+.sidebar .segmented button:hover {
+  color: var(--sidebar-fg);
+}
+
+.sidebar .segmented button.active,
+.sidebar .segmented button.active:hover {
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+
+.panel .check {
+  margin-top: 12px;
+}
+
 .file-row button {
   padding: 4px 2px;
   font-size: 12px;
