@@ -15,7 +15,7 @@
  * (status 'impossible') and still packs everything else.
  */
 
-import { insideContainer, orientations, volume } from './geometry'
+import { boxWeight, insideContainer, orientations, volume } from './geometry'
 import { optimize } from './optimizer'
 import { pack } from './packer'
 import type { BoxType, Container, Impossibility, PackResult } from './types'
@@ -30,6 +30,10 @@ export interface MultiPackStats {
   containers: number
   requested: number
   placed: number
+  /** Weight loaded over all containers; 0 when no box has one. */
+  weight: number
+  /** What one container may carry; 0 when there is no limit. */
+  maxWeight: number
   /** Interior volume of one container. */
   containerVolume: number
   /** Over all containers. */
@@ -76,6 +80,8 @@ export interface MultiPackOptions {
    * does not fit still rolls on, so a container never holds more than it can.
    */
   allocation?: readonly (Record<string, number> | undefined)[]
+  /** What one container may carry, in the same unit as BoxType.weight. 0 for no limit. */
+  maxWeight?: number
   /** Never open more than this many containers. Default 50. */
   maxContainers?: number
   /**
@@ -163,6 +169,7 @@ export function packMany(
     throw new Error(`Invalid scenario: ${detail}`)
   }
   const mode = options.mode ?? 'optimize'
+  const maxWeight = options.maxWeight ?? 0
   const maxContainers = options.maxContainers ?? DEFAULT_MAX_CONTAINERS
   const maxRuns = options.optimizeRuns ?? 0
   const budgetMs = options.budgetMs ?? DEFAULT_OPTIMIZE_MS
@@ -178,10 +185,14 @@ export function packMany(
     const fitsAlone = orientations(t.dims, options.keepUpright).some((s) =>
       insideContainer(origin, s, container),
     )
-    if (fitsAlone) packable.push(t)
+    const weight = boxWeight(t)
+    const tooHeavy = maxWeight > 0 && weight > maxWeight
+    if (fitsAlone && !tooHeavy) packable.push(t)
     else {
       unplaced[t.id] = t.qty
-      impossibility ??= { kind: 'oversize', typeId: t.id }
+      impossibility ??= tooHeavy
+        ? { kind: 'overweight', typeId: t.id, weight, maxWeight }
+        : { kind: 'oversize', typeId: t.id }
     }
   }
 
@@ -206,6 +217,7 @@ export function packMany(
       const before = runs
       const r = optimize(container, subset, {
         keepUpright: options.keepUpright,
+        maxWeight,
         objective: 'keep-most-volume',
         maxRuns: maxRuns - runs,
         onProgress: (p) => {
@@ -221,7 +233,7 @@ export function packMany(
     runs++
     // skipChecks: what is left may well exceed one container; that is the point.
     return asOwnPacking(
-      pack(container, subset, { keepUpright: options.keepUpright, skipChecks: true }),
+      pack(container, subset, { keepUpright: options.keepUpright, maxWeight, skipChecks: true }),
     )
   }
 
@@ -292,6 +304,7 @@ export function packMany(
     for (const [id, n] of Object.entries(placedOf)) if (n > 0) unplaced[id] = n
   }
   const placedVolume = containers.reduce((v, c) => v + c.stats.placedVolume, 0)
+  const weight = containers.reduce((w, c) => w + c.stats.weight, 0)
   return {
     status,
     ...(impossibility ? { impossibility } : {}),
@@ -301,6 +314,8 @@ export function packMany(
       containers: containers.length,
       requested,
       placed,
+      weight,
+      maxWeight,
       containerVolume,
       placedVolume,
       fill: containers.length > 0 ? placedVolume / (containers.length * containerVolume) : 0,

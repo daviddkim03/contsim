@@ -6,6 +6,7 @@ import {
   mmToUnit,
   presetDims,
   presetFor,
+  presetPayloadText,
   presetTexts,
 } from '../../src/ui/presets'
 
@@ -40,6 +41,15 @@ describe('container presets', () => {
     expect(presetDims(preset, 'in')).toEqual({ l: 232.2, w: 92.6, h: 94.2 })
     expect(presetDims(preset, 'm')).toEqual({ l: 5.898, w: 2.352, h: 2.393 })
     expect(presetTexts(preset, 'ft')).toEqual({ l: '19.35', w: '7.72', h: '7.85' })
+  })
+
+  it('carries a payload for every container, biggest for the 20 ft box', () => {
+    for (const preset of CONTAINER_PRESETS) expect(preset.payloadKg).toBeGreaterThan(1000)
+    // A 20 ft container carries the most: same gross limit, lightest of the big boxes.
+    expect(presetFor('20ft')!.payloadKg).toBeGreaterThan(presetFor('40ft')!.payloadKg)
+    expect(presetFor('10ft')!.payloadKg).toBeLessThan(presetFor('20ft')!.payloadKg)
+    expect(presetPayloadText(presetFor('20ft')!, 'kg')).toBe('28280')
+    expect(presetPayloadText(presetFor('20ft')!, 'lb')).toBe('62347')
   })
 
   it('makes high cubes taller and 40 ft twice as long as 20 ft', () => {

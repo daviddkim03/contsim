@@ -36,7 +36,7 @@ afterEach(() => resetUserCatalog())
 describe('the built-in catalog', () => {
   it('is a short list of placeholders that can be looked up by code', () => {
     expect(catalogItems()).toEqual(CATALOG)
-    expect(findCatalogItem('3036')).toEqual({ code: '3036', w: 30, d: 12, h: 36 })
+    expect(findCatalogItem('3036')).toMatchObject({ code: '3036', w: 30, d: 12, h: 36 })
     expect(findCatalogItem('nope')).toBeNull()
     expect(isUserCatalogItem('3036')).toBe(false)
   })

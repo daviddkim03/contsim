@@ -78,7 +78,7 @@ describe('readWorkbook', () => {
 
   it('reads the catalog the app ships with', async () => {
     const rows = await readFirstSheet(new Uint8Array(readFileSync('data/catalog.xlsx')))
-    expect(rows[0]).toEqual(['TYPE', 'W', 'D', 'H'])
+    expect(rows[0]).toEqual(['TYPE', 'W', 'D', 'H', 'WEIGHT (kg)'])
     expect(rows.slice(1).map((r) => r[0])).toEqual(CATALOG.map((c) => c.code))
   })
 

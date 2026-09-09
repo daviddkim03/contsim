@@ -143,4 +143,34 @@ describe('pack', () => {
     expect(packingViolation(perf300, r)).toBeNull()
     expect(r.stats.ms).toBeLessThan(200)
   })
+
+  it('leaves boxes behind once the container has taken its payload', () => {
+    const types = [{ ...boxType('unit', 1, 1, 1, 8), weight: 300 }]
+    const r = pack({ l: 2, w: 2, h: 2 }, types, { maxWeight: 1000 })
+    // Three boxes weigh 900; a fourth would pass the limit.
+    expect(r.status).toBe('not-found')
+    expect(r.placements).toHaveLength(3)
+    expect(r.stats.weight).toBe(900)
+    expect(r.unplaced).toEqual({ unit: 5 })
+    expect(
+      packingViolation({ container: { l: 2, w: 2, h: 2 }, types, keepUpright: false }, r),
+    ).toBeNull()
+  })
+
+  it('still takes a lighter box after passing over a heavy one', () => {
+    const types = [
+      { ...boxType('heavy', 2, 2, 2, 1), weight: 150 },
+      { ...boxType('light', 1, 1, 1, 2), weight: 50 },
+    ]
+    // skipChecks, because a lone box over the limit is what another container is for.
+    const r = pack({ l: 2, w: 2, h: 2 }, types, { maxWeight: 100, skipChecks: true })
+    expect(r.placements.map((x) => x.typeId)).toEqual(['light', 'light'])
+    expect(r.stats.weight).toBe(100)
+    expect(r.unplaced).toEqual({ heavy: 1 })
+  })
+
+  it('counts no weight when the boxes have none', () => {
+    const r = pack({ l: 2, w: 2, h: 2 }, tiny.types, { maxWeight: 1000 })
+    expect(r.stats).toMatchObject({ placed: 8, weight: 0 })
+  })
 })

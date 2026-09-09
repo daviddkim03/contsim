@@ -23,6 +23,7 @@ import { parseCsv, readWorkbook } from './spreadsheet'
 import {
   containerTexts,
   edits,
+  payloadText,
   exampleDraft,
   type AppState,
   type BoxTypeDraft,
@@ -31,7 +32,14 @@ import {
   type Store,
   type TypeField,
 } from './state'
-import { UNITS, convertLength, parseLength, type Unit } from './units'
+import {
+  UNITS,
+  WEIGHT_UNITS,
+  convertLength,
+  parseLength,
+  type Unit,
+  type WeightUnit,
+} from './units'
 import { writeXlsx, XLSX_MIME } from './xlsx'
 
 export interface Panel {
@@ -47,7 +55,7 @@ const LOAD_MODE_HINTS: Record<LoadMode, string> = {
   even: 'Every container gets close to the same number of boxes.',
   optimize: 'Fills each container as full as it can, so the last one may be nearly empty.',
 }
-const TYPE_FIELDS: TypeField[] = ['name', 'l', 'w', 'h', 'qty']
+const TYPE_FIELDS: TypeField[] = ['name', 'l', 'w', 'h', 'weight', 'qty']
 const DIM_FIELDS: TypeField[] = ['l', 'w', 'h']
 /** Option id of the "Custom size" entry at the end of every catalog search. */
 const CUSTOM_OPTION = '\u0000custom'
@@ -62,9 +70,14 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
     <section class="panel">
       <div class="panel-title">
         <h2>Container</h2>
-        <select class="unit-select" data-field="unit" aria-label="Unit">
-          ${UNITS.map((u) => `<option value="${u}">${u}</option>`).join('')}
-        </select>
+        <span class="unit-selects">
+          <select class="unit-select" data-field="unit" aria-label="Unit">
+            ${UNITS.map((u) => `<option value="${u}">${u}</option>`).join('')}
+          </select>
+          <select class="unit-select" data-field="weightUnit" aria-label="Weight unit">
+            ${WEIGHT_UNITS.map((u) => `<option value="${u}">${u}</option>`).join('')}
+          </select>
+        </span>
       </div>
       <select class="container-type" data-field="containerType" aria-label="Container type">
         ${CONTAINER_PRESETS.map((p) => `<option value="${p.id}">${p.name}</option>`).join('')}
@@ -77,6 +90,11 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
         <span class="times">×</span>
         <label><span>H</span><input data-field="container.h" inputmode="decimal" autocomplete="off" aria-label="Container height"></label>
       </div>
+      <label class="payload">
+        <span>Payload</span>
+        <input data-field="maxWeight" inputmode="decimal" autocomplete="off" aria-label="Maximum payload">
+        <span class="payload-unit" data-role="payload-unit"></span>
+      </label>
       <p class="hint" data-role="container-hint">Interior dimensions</p>
     </section>
 
@@ -120,6 +138,9 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
     CONTAINER_KEYS.map((k) => [k, query<HTMLInputElement>(root, `[data-field="container.${k}"]`)]),
   ) as Record<ContainerKey, HTMLInputElement>
   const unitSelect = query<HTMLSelectElement>(root, '[data-field="unit"]')
+  const weightUnitSelect = query<HTMLSelectElement>(root, '[data-field="weightUnit"]')
+  const payloadInput = query<HTMLInputElement>(root, '[data-field="maxWeight"]')
+  const payloadUnit = query<HTMLElement>(root, '[data-role="payload-unit"]')
   const containerTypeSelect = query<HTMLSelectElement>(root, '[data-field="containerType"]')
   const containerHint = query<HTMLElement>(root, '[data-role="container-hint"]')
   const uprightCheckbox = query<HTMLInputElement>(root, '[data-field="keepUpright"]')
@@ -151,6 +172,8 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
       if (TYPE_FIELDS.includes(field as TypeField)) {
         store.edit((d) => edits.setTypeField(d, id, field as TypeField, target.value))
       }
+    } else if (field === 'maxWeight') {
+      store.edit((d) => edits.setMaxWeight(d, target.value))
     } else if (field.startsWith('container.')) {
       const key = field.slice('container.'.length) as ContainerKey
       store.edit((d) => edits.setContainer(d, key, target.value))
@@ -160,6 +183,9 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
   root.addEventListener('change', (event) => {
     const target = event.target
     if (target === unitSelect) store.edit((d) => edits.setUnit(d, unitSelect.value as Unit))
+    if (target === weightUnitSelect) {
+      store.edit((d) => edits.setWeightUnit(d, weightUnitSelect.value as WeightUnit))
+    }
     if (target === containerTypeSelect) {
       store.edit((d) => edits.setContainerType(d, containerTypeSelect.value as ContainerType))
     }
@@ -258,7 +284,8 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
   }
 
   async function downloadTemplate(): Promise<void> {
-    const workbook = orderTemplate(store.get().draft.unit)
+    const { unit, weightUnit } = store.get().draft
+    const workbook = orderTemplate(unit, weightUnit)
     download(new Blob([await writeXlsx(workbook)], { type: XLSX_MIME }), ORDER_TEMPLATE_FILENAME)
   }
 
@@ -271,11 +298,11 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
   async function importFile(file: File | undefined): Promise<void> {
     if (!file) return
     const { draft } = store.get()
-    const read = (unit: Unit): ImportParse => {
+    const read = (unit: Unit, weightUnit: WeightUnit): ImportParse => {
       try {
         return sheets
-          ? importWorkbook(sheets, unit, draft.types)
-          : importOrder(rows!, unit, draft.types)
+          ? importWorkbook(sheets, unit, weightUnit, draft.types)
+          : importOrder(rows!, unit, weightUnit, draft.types)
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : String(error) }
       }
@@ -292,30 +319,40 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
       return
     }
 
-    // Read once to see what is in the file, then again in the unit the user picks.
-    const preview = read(draft.unit)
+    // Read once to see what is in the file, then again in the units the user picks.
+    const preview = read(draft.unit, draft.weightUnit)
     if (!preview.ok) {
       showNotice(`${file.name}: ${preview.error}`, true)
       return
     }
-    // A workbook saved by contsim names its own unit; anything else is asked about.
-    const stated = preview.imported.container ? preview.imported.unit : null
-    const unit = await promptImport({
+    // A workbook saved by contsim names its own units; anything else is asked about.
+    const stated = preview.imported.container ? preview.imported : null
+    const chosen = await promptImport({
       fileName: file.name,
       rows: preview.imported.types.length,
       boxes: preview.imported.boxes,
       skipped: preview.imported.skipped,
       replaces: draft.types.length,
-      unit: stated ?? preview.imported.detectedUnit ?? draft.unit,
+      unit: stated?.unit ?? preview.imported.detectedUnit ?? draft.unit,
       askUnit: stated === null,
+      weightUnit: stated?.weightUnit ?? preview.imported.detectedWeightUnit ?? draft.weightUnit,
+      // Only worth asking when the file brought weights and did not name their unit.
+      askWeightUnit:
+        stated === null && preview.imported.hasWeights && !preview.imported.detectedWeightUnit,
     })
-    if (!unit) return
-    const parsed = unit === preview.imported.unit ? preview : read(unit)
+    if (!chosen) return
+    const same =
+      chosen.unit === preview.imported.unit && chosen.weightUnit === preview.imported.weightUnit
+    const parsed = same ? preview : read(chosen.unit, chosen.weightUnit)
     if (!parsed.ok) {
       showNotice(`${file.name}: ${parsed.error}`, true)
       return
     }
-    const imported = { ...parsed.imported, unit: stated ?? unit }
+    const imported = {
+      ...parsed.imported,
+      unit: stated?.unit ?? chosen.unit,
+      weightUnit: stated?.weightUnit ?? chosen.weightUnit,
+    }
     store.edit((d) => edits.applyImport(d, imported))
     const shown = imported.notes.slice(0, 3).join('. ')
     const more = imported.notes.length > 3 ? ` (+${imported.notes.length - 3} more)` : ''
@@ -337,7 +374,7 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
           <button type="button" class="icon" data-action="remove" aria-label="Remove box" title="Remove box">×</button>
         </span>
       </div>
-      <div class="row-bottom">
+      <div class="row-size">
         <span class="row-dims" data-role="dims"></span>
         <div class="dims compact" data-role="custom-dims">
           <input data-field="l" inputmode="decimal" placeholder="L" autocomplete="off" aria-label="Length">
@@ -346,6 +383,12 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
           <span class="times">×</span>
           <input data-field="h" inputmode="decimal" placeholder="H" autocomplete="off" aria-label="Height">
         </div>
+      </div>
+      <div class="row-bottom">
+        <label class="row-weight">
+          <input data-field="weight" inputmode="decimal" placeholder="Weight" autocomplete="off" aria-label="Weight of one box">
+          <span data-role="row-weight-unit"></span>
+        </label>
         <div class="stepper">
           <button type="button" data-action="dec" aria-label="Decrease quantity">-</button>
           <input type="number" min="0" step="1" data-field="qty" aria-label="Quantity">
@@ -411,6 +454,7 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
     index: number,
     issues: Record<string, string>,
     unit: Unit,
+    weightUnit: WeightUnit,
   ): void {
     row.dataset.kind = type.kind
     query<HTMLElement>(row, '.swatch').style.background = type.color
@@ -455,6 +499,10 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
     const qty = query<HTMLInputElement>(row, '[data-field="qty"]')
     setValue(qty, type.qty)
     setInvalid(qty, issues[`types[${index}].qty`])
+    const weight = query<HTMLInputElement>(row, '[data-field="weight"]')
+    setValue(weight, type.weight)
+    setInvalid(weight, issues[`types[${index}].weight`])
+    setText(query(row, '[data-role="row-weight-unit"]'), weightUnit)
   }
 
   function render(state: AppState): void {
@@ -470,10 +518,15 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
     setText(
       containerHint,
       preset
-        ? 'Typical interior size. Choose Custom size to enter your own.'
-        : 'Interior dimensions',
+        ? 'Typical interior size and maximum payload. Choose Custom size for your own.'
+        : 'Interior dimensions and what the container may carry',
     )
     setValue(unitSelect, draft.unit)
+    setValue(weightUnitSelect, draft.weightUnit)
+    setValue(payloadInput, payloadText(draft))
+    payloadInput.disabled = preset !== null
+    setInvalid(payloadInput, derived.issues['container.maxWeight'])
+    setText(payloadUnit, draft.weightUnit)
     uprightCheckbox.checked = draft.keepUpright
     for (const button of modeButtons) {
       const on = button.dataset.loadMode === draft.mode
@@ -491,7 +544,7 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
       if (row) existing.delete(type.id)
       else row = createRow(type.id)
       if (list.children[index] !== row) list.insertBefore(row, list.children[index] ?? null)
-      updateRow(row, type, index, derived.issues, draft.unit)
+      updateRow(row, type, index, derived.issues, draft.unit, draft.weightUnit)
     })
     for (const row of existing.values()) row.remove()
     empty.hidden = draft.types.length > 0

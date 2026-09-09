@@ -14,7 +14,7 @@
 import { summarizeStatus } from './describe'
 import { containerTypeName } from './presets'
 import { shownResult, type AppState } from './state'
-import { fromInt, volumeOf, type Unit } from './units'
+import { fromGrams, fromInt, volumeOf, type Unit } from './units'
 import { percent, type Cell, type Sheet, type Workbook } from './xlsx'
 
 export const EXCEL_FILENAME = 'contsim-packing.xlsx'
@@ -55,7 +55,11 @@ export function buildReport(state: AppState, now: Date = new Date()): Workbook |
   const volumeHeader = (label: string) => `${label} (${volumeUnit})`
 
   const status = summarizeStatus(draft, derived, result)
-  const { requested, placed, containers: count, containerVolume } = result.stats
+  const { requested, placed, containers: count, containerVolume, maxWeight } = result.stats
+  const weightUnit = draft.weightUnit
+  /** Grams to the display unit, as a number Excel can add up. */
+  const weight = (grams: number) => Number(fromGrams(grams, weightUnit).toFixed(3))
+  const weightHeader = (label: string) => `${label} (${weightUnit})`
   const capacity = containerVolume * Math.max(count, 1)
   const placedByType = new Map<string, number>()
   const placedVolumeByType = new Map<string, number>()
@@ -78,6 +82,9 @@ export function buildReport(state: AppState, now: Date = new Date()): Workbook |
     [volumeHeader('Container volume, each'), volume(containerVolume)],
     ['Keep boxes upright', scenario.keepUpright ? 'Yes' : 'No'],
     ['Loading mode', draft.mode === 'even' ? 'Even' : 'Optimize'],
+    ['Weight unit', weightUnit],
+    ['Payload per container', maxWeight > 0 ? weight(maxWeight) : 'not set'],
+    ['Weight loaded', weight(result.stats.weight)],
     ['Containers needed', count],
     ['Boxes requested', requested],
     ['Boxes placed', placed],
@@ -97,6 +104,8 @@ export function buildReport(state: AppState, now: Date = new Date()): Workbook |
     c.placements.length,
     percent(c.stats.fill),
     volume(c.stats.placedVolume),
+    weight(c.stats.weight),
+    maxWeight > 0 ? percent(c.stats.weight / maxWeight) : null,
   ])
 
   const boxes: Cell[][] = scenario.types.map((t, i) => {
@@ -115,6 +124,8 @@ export function buildReport(state: AppState, now: Date = new Date()): Workbook |
       volume(t.dims.l * t.dims.w * t.dims.h),
       volume(placedVolume),
       percent(capacity > 0 ? placedVolume / capacity : 0),
+      t.weight ? weight(t.weight) : null,
+      t.weight ? weight(t.weight * n) : null,
     ]
   })
 
@@ -138,9 +149,16 @@ export function buildReport(state: AppState, now: Date = new Date()): Workbook |
     { name: 'Summary', header: ['Item', 'Value'], rows: summary, widths: [30, 70] },
     {
       name: 'Containers',
-      header: ['Container', 'Boxes', 'Fill', volumeHeader('Placed volume')],
+      header: [
+        'Container',
+        'Boxes',
+        'Fill',
+        volumeHeader('Placed volume'),
+        weightHeader('Weight'),
+        'Share of payload',
+      ],
       rows: containers,
-      widths: [11, 9, 9, 22],
+      widths: [11, 9, 9, 22, 14, 17],
     },
     {
       name: 'Boxes',
@@ -157,9 +175,11 @@ export function buildReport(state: AppState, now: Date = new Date()): Workbook |
         volumeHeader('Volume each'),
         volumeHeader('Placed volume'),
         'Share of capacity',
+        weightHeader('Weight each'),
+        weightHeader('Total weight'),
       ],
       rows: boxes,
-      widths: [5, 22, 10, 12, 12, 12, 11, 9, 10, 20, 22, 18],
+      widths: [5, 22, 10, 12, 12, 12, 11, 9, 10, 20, 22, 18, 15, 16],
     },
     {
       name: 'Placements',

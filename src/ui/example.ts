@@ -1,4 +1,4 @@
-import { catalogTexts } from './catalogSearch'
+import { catalogTexts, catalogWeightText } from './catalogSearch'
 import { findCatalogItem } from './catalogStore'
 import { PALETTE } from './palette'
 import type { Draft } from './state'
@@ -21,6 +21,8 @@ export function exampleDraft(): Draft {
     containerType: '20ft',
     mode: 'even',
     allocation: null,
+    maxWeight: '',
+    weightUnit: 'kg',
     // The 20 ft preset in inches, so switching to Custom starts from a real container.
     container: { l: '232.2', w: '92.6', h: '94.2' },
     keepUpright: false,
@@ -34,6 +36,7 @@ export function exampleDraft(): Draft {
         catalogCode: code,
         name: code,
         ...catalogTexts(item, 'in'),
+        weight: catalogWeightText(item, 'kg'),
         qty: String(qty),
         color: PALETTE[i % PALETTE.length]!,
       }

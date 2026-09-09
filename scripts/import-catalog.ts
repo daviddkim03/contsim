@@ -31,11 +31,16 @@ if (
   throw new Error(`Expected the header ${expected.join(', ')}; found ${JSON.stringify(header)}`)
 }
 
+/** An optional weight column, in kilograms unless its header says pounds. */
+const weightAt = header.findIndex((cell) => /^\s*(weight|wt|mass)\b/i.test(String(cell ?? '')))
+const inPounds = weightAt >= 0 && /\b(lb|lbs|pound|pounds)\b/i.test(String(header[weightAt]))
+
 interface Item {
   code: string
   w: number
   d: number
   h: number
+  kg?: number
 }
 
 const items: Item[] = []
@@ -55,12 +60,19 @@ rows.forEach((row, i) => {
     if (!Number.isFinite(v) || v <= 0) throw new Error(`Row ${line} (${code}): ${label} is ${v}`)
   }
   seen.add(code)
-  items.push({ code, w: w!, d: d!, h: h! })
+  const raw = weightAt >= 0 ? Number(row[weightAt]) : NaN
+  const kg =
+    Number.isFinite(raw) && raw > 0
+      ? Number((inPounds ? raw * 0.45359237 : raw).toFixed(3))
+      : undefined
+  items.push({ code, w: w!, d: d!, h: h!, ...(kg === undefined ? {} : { kg }) })
 })
 if (items.length === 0) throw new Error('No items found')
 
 const lines = items.map(
-  (it) => `  { code: ${JSON.stringify(it.code)}, w: ${it.w}, d: ${it.d}, h: ${it.h} },`,
+  (it) =>
+    `  { code: ${JSON.stringify(it.code)}, w: ${it.w}, d: ${it.d}, h: ${it.h}` +
+    `${it.kg === undefined ? '' : `, kg: ${it.kg}`} },`,
 )
 writeFileSync(
   TARGET,
@@ -76,6 +88,8 @@ export interface CatalogItem {
   w: number
   d: number
   h: number
+  /** Weight of one cabinet in kilograms, when the catalog gives it. */
+  kg?: number
 }
 
 export const CATALOG: readonly CatalogItem[] = [

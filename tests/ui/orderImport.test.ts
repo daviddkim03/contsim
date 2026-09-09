@@ -20,7 +20,8 @@ import {
 import { convertLength } from '../../src/ui/units'
 import { writeXlsx } from '../../src/ui/xlsx'
 
-const run = (text: string, unit: 'in' | 'cm' | 'mm' = 'in') => importOrder(parseCsv(text), unit, [])
+const run = (text: string, unit: 'in' | 'cm' | 'mm' = 'in', weightUnit: 'kg' | 'lb' = 'kg') =>
+  importOrder(parseCsv(text), unit, weightUnit, [])
 
 const stateOf = (draft: Draft) => ({
   draft,
@@ -31,10 +32,18 @@ const stateOf = (draft: Draft) => ({
 
 describe('parseHeader', () => {
   it('recognizes the column words, case and punctuation aside, with an optional unit', () => {
-    expect(parseHeader('Code')).toEqual({ column: 'code', word: 'code', unit: null })
+    expect(parseHeader('Code')).toEqual({
+      column: 'code',
+      word: 'code',
+      unit: null,
+      weightUnit: null,
+    })
     expect(parseHeader(' QTY. ')).toMatchObject({ column: 'qty' })
-    expect(parseHeader('Width (mm)')).toEqual({ column: 'first', word: 'width', unit: 'mm' })
-    expect(parseHeader('Depth in')).toEqual({ column: 'second', word: 'depth', unit: 'in' })
+    expect(parseHeader('Width (mm)')).toMatchObject({ column: 'first', word: 'width', unit: 'mm' })
+    expect(parseHeader('Depth in')).toMatchObject({ column: 'second', word: 'depth', unit: 'in' })
+    expect(parseHeader('Weight (kg)')).toMatchObject({ column: 'weight', weightUnit: 'kg' })
+    expect(parseHeader('Weight each (lbs)')).toMatchObject({ column: 'weight', weightUnit: 'lb' })
+    expect(parseHeader('Mass')).toMatchObject({ column: 'weight', weightUnit: null })
     expect(parseHeader('Height (inches)')).toMatchObject({ column: 'third', unit: 'in' })
     expect(parseHeader('Requested')).toMatchObject({ column: 'qty' })
     expect(parseHeader('Colour')).toMatchObject({ column: 'color' })
@@ -123,10 +132,29 @@ describe('importOrder', () => {
         ['Bin', '1', '10,5', '10 in', '3'],
       ],
       'in',
+      'kg',
       [],
     )
     expect(r.ok && r.imported.types[0]).toMatchObject({ l: '34.5', w: '36', h: '20.25', qty: '2' })
     expect(r.ok && r.imported.types[1]).toMatchObject({ l: '10.5', w: '10', h: '3', qty: '1' })
+  })
+
+  it('reads a weight per box, converting from the unit in its header', () => {
+    const r = run('code,qty,weight (lb)\n3036,2,55\n2442,1,\n')
+    expect(r.ok && r.imported.types.map((t) => t.weight)).toEqual(['24.948', ''])
+    expect(r.ok && r.imported).toMatchObject({ hasWeights: true, detectedWeightUnit: 'lb' })
+
+    // Without a unit in the header the weights are in the unit given to the import.
+    const asKg = run('code,qty,weight\n3036,2,55', 'in', 'kg')
+    expect(asKg.ok && asKg.imported.types[0]!.weight).toBe('55')
+    const asLb = run('code,qty,weight\n3036,2,55', 'in', 'lb')
+    expect(asLb.ok && asLb.imported).toMatchObject({ hasWeights: true, detectedWeightUnit: null })
+    expect(asLb.ok && asLb.imported.types[0]!.weight).toBe('55')
+  })
+
+  it('says when a file brought no weights at all', () => {
+    const r = run('code,qty\n3036,2')
+    expect(r.ok && r.imported.hasWeights).toBe(false)
   })
 
   it('keeps a valid color column and ignores anything else', () => {
@@ -154,16 +182,18 @@ describe('importWorkbook', () => {
     draft = edits.setKeepUpright(draft, true)
     draft = edits.setUnit(draft, 'cm')
     const bytes = await writeXlsx(buildReport(stateOf(draft))!)
-    const r = importWorkbook(await readWorkbook(bytes), 'in', [])
+    const r = importWorkbook(await readWorkbook(bytes), 'in', 'kg', [])
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.imported.container).toEqual({
       containerType: '40ft-hc',
       container: null,
+      maxWeight: '26580',
       keepUpright: true,
       mode: 'even',
     })
     expect(r.imported.unit).toBe('cm')
+    expect(r.imported.weightUnit).toBe('kg')
     expect(r.imported.types.map((t) => [t.kind, t.catalogCode, t.qty, t.color])).toEqual(
       draft.types.map((t) => [t.kind, t.catalogCode, t.qty, t.color]),
     )
@@ -183,12 +213,13 @@ describe('importWorkbook', () => {
     draft = edits.setTypeField(draft, id, 'h', '20')
     draft = edits.setTypeField(draft, id, 'qty', '3')
     const bytes = await writeXlsx(buildReport(stateOf(draft))!)
-    const r = importWorkbook(await readWorkbook(bytes), 'mm', [])
+    const r = importWorkbook(await readWorkbook(bytes), 'mm', 'kg', [])
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.imported.container).toEqual({
       containerType: 'custom',
       container: { l: '232.2', w: '92.6', h: '94.2' },
+      maxWeight: '',
       keepUpright: false,
       mode: 'even',
     })
@@ -205,7 +236,7 @@ describe('importWorkbook', () => {
 
   it('treats a workbook without Boxes and Summary sheets as an order in its first sheet', async () => {
     const bytes = await writeXlsx(orderTemplate('in'))
-    const r = importWorkbook(await readWorkbook(bytes), 'in', [])
+    const r = importWorkbook(await readWorkbook(bytes), 'in', 'kg', [])
     expect(r.ok && r.imported.types.map((t) => [t.kind, t.name, t.qty, t.l])).toEqual([
       ['catalog', '3036', '4', '30'],
       ['catalog', '2442', '2', '24'],
@@ -225,10 +256,18 @@ describe('readSummary', () => {
           ['Loading mode', 'Optimize'],
         ],
         'in',
+        'kg',
       ),
     ).toEqual({
-      container: { containerType: '20ft-hc', container: null, keepUpright: true, mode: 'optimize' },
+      container: {
+        containerType: '20ft-hc',
+        container: null,
+        maxWeight: '',
+        keepUpright: true,
+        mode: 'optimize',
+      },
       unit: 'mm',
+      weightUnit: 'kg',
     })
     expect(
       readSummary(
@@ -240,19 +279,22 @@ describe('readSummary', () => {
           ['Keep boxes upright', 'No'],
         ],
         'in',
+        'kg',
       ),
     ).toEqual({
       container: {
         containerType: 'custom',
         container: { l: '100', w: '50', h: '40.5' },
+        maxWeight: '',
         keepUpright: false,
         // A workbook from before the modes existed loads as Even, the default.
         mode: 'even',
       },
       unit: 'in',
+      weightUnit: 'kg',
     })
-    expect(readSummary([['Container type', 'custom']], 'in')).toBeNull()
-    expect(readSummary([['Item', 'Value']], 'in')).toBeNull()
+    expect(readSummary([['Container type', 'custom']], 'in', 'kg')).toBeNull()
+    expect(readSummary([['Item', 'Value']], 'in', 'kg')).toBeNull()
   })
 })
 
@@ -261,6 +303,8 @@ describe('orderTemplate', () => {
     const wb = orderTemplate('mm')
     expect(wb.sheets.map((s) => s.name)).toEqual(['Order', 'Guide'])
     expect(wb.sheets[0]!.header[2]).toBe('Width (mm)')
+    expect(wb.sheets[0]!.header[5]).toBe('Weight (kg)')
+    expect(orderTemplate('in', 'lb').sheets[0]!.header[5]).toBe('Weight (lb)')
     expect(wb.sheets[0]!.rows[1]![0]).toBe('2442')
     expect(wb.sheets[0]!.rows[2]!.slice(2, 5)).toEqual([1016, 762, 508])
     expect(wb.sheets[1]!.rows).toHaveLength(ORDER_FORMAT_GUIDE.length)

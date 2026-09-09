@@ -75,6 +75,8 @@ describe('derive', () => {
       containerType: 'custom',
       mode: 'even',
       allocation: null,
+      maxWeight: '',
+      weightUnit: 'kg',
       container: { l: '', w: '-', h: '9'.repeat(30) },
       types: [
         {
@@ -85,6 +87,7 @@ describe('derive', () => {
           l: '.',
           w: '1',
           h: '1',
+          weight: 'x',
           qty: '-3',
           color: '#000',
         },
@@ -245,19 +248,31 @@ describe('edits', () => {
   it('applyImport replaces the rows and applies container settings when the file has them', () => {
     const draft = mixed()
     const types = [{ ...draft.types[0]!, id: 'new', qty: '7' }]
-    const plain = edits.applyImport(draft, { types, unit: 'in', container: null })
+    const plain = edits.applyImport(draft, { types, unit: 'in', weightUnit: 'kg', container: null })
     expect(plain.types).toBe(types)
     expect(plain).toMatchObject({ unit: 'in', containerType: 'custom', keepUpright: false })
 
     // Without container settings the file's unit still applies, so the container converts.
-    const metric = edits.applyImport(draft, { types, unit: 'mm', container: null })
+    const metric = edits.applyImport(draft, {
+      types,
+      unit: 'mm',
+      weightUnit: 'kg',
+      container: null,
+    })
     expect(metric).toMatchObject({ unit: 'mm', containerType: 'custom' })
     expect(metric.container).toEqual({ l: '5892.8', w: '2336.8', h: '2387.6' })
 
     const preset = edits.applyImport(draft, {
       types,
       unit: 'mm',
-      container: { containerType: '40ft', container: null, keepUpright: true, mode: 'optimize' },
+      weightUnit: 'kg',
+      container: {
+        containerType: '40ft',
+        container: null,
+        maxWeight: '',
+        keepUpright: true,
+        mode: 'optimize',
+      },
     })
     expect(preset).toMatchObject({
       containerType: '40ft',
@@ -269,15 +284,17 @@ describe('edits', () => {
     const custom = edits.applyImport(draft, {
       types,
       unit: 'cm',
+      weightUnit: 'lb',
       container: {
         containerType: 'custom',
         container: { l: '1', w: '2', h: '3' },
+        maxWeight: '4000',
         keepUpright: false,
         mode: 'even',
       },
     })
     expect(custom.container).toEqual({ l: '1', w: '2', h: '3' })
-    expect(custom.unit).toBe('cm')
+    expect(custom).toMatchObject({ unit: 'cm', weightUnit: 'lb', maxWeight: '4000' })
   })
 
   it('does not mutate the previous draft', () => {

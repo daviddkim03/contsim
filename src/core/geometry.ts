@@ -1,5 +1,10 @@
 import type { Box, Dims, Point, Size } from './types'
 
+/** Weight of one box of this type; unknown weights count as nothing. */
+export function boxWeight(t: { weight?: number }): number {
+  return t.weight ?? 0
+}
+
 export function volume({ l, w, h }: Dims): number {
   return l * w * h
 }

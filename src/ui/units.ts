@@ -7,6 +7,24 @@
 export type Unit = 'in' | 'ft' | 'cm' | 'mm' | 'm'
 export const UNITS: readonly Unit[] = ['in', 'ft', 'cm', 'mm', 'm']
 
+export type WeightUnit = 'kg' | 'lb'
+export const WEIGHT_UNITS: readonly WeightUnit[] = ['kg', 'lb']
+
+/** Weights reach the core as whole grams, so they compare exactly like lengths. */
+const GRAMS_PER: Record<WeightUnit, number> = { kg: 1000, lb: 453.59237 }
+
+export function toGrams(value: number, unit: WeightUnit): number {
+  return Math.round(value * GRAMS_PER[unit])
+}
+
+export function fromGrams(grams: number, unit: WeightUnit): number {
+  return grams / GRAMS_PER[unit]
+}
+
+export function convertWeight(value: number, from: WeightUnit, to: WeightUnit): number {
+  return from === to ? value : Number(fromGrams(toGrams(value, from), to).toFixed(3))
+}
+
 /** Decimals kept from user input. Anything finer is rounded. */
 export const MAX_DECIMALS = 3
 
@@ -90,6 +108,12 @@ export function volumeOf(int: number, scale: number, unit: Unit): Volume {
     case 'm':
       return { value: cubic, unit: 'm³', decimals: 2 }
   }
+}
+
+/** "1,250 kg", or "1.2 kg" when the load is small enough for the decimal to matter. */
+export function formatWeight(grams: number, unit: WeightUnit): string {
+  const value = fromGrams(grams, unit)
+  return `${number(value, value < 100 ? 2 : 0)} ${unit}`
 }
 
 export function formatVolume(int: number, scale: number, unit: Unit): string {

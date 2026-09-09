@@ -8,12 +8,30 @@ import {
   type PackResult,
   type Scenario,
 } from '../core'
-import { catalogTexts } from './catalogSearch'
+import { catalogTexts, catalogWeightText } from './catalogSearch'
 import { findCatalogItem } from './catalogStore'
 import { exampleDraft } from './example'
 import { nextColor } from './palette'
-import { CONTAINER_TYPES, presetFor, presetTexts, type ContainerType } from './presets'
-import { UNITS, convertLength, parseCount, parseLength, scaleFor, toInt, type Unit } from './units'
+import {
+  CONTAINER_TYPES,
+  presetFor,
+  presetPayloadText,
+  presetTexts,
+  type ContainerType,
+} from './presets'
+import {
+  UNITS,
+  WEIGHT_UNITS,
+  convertLength,
+  convertWeight,
+  parseCount,
+  parseLength,
+  scaleFor,
+  toGrams,
+  toInt,
+  type Unit,
+  type WeightUnit,
+} from './units'
 
 export type BoxKind = 'catalog' | 'custom'
 
@@ -28,6 +46,8 @@ export interface BoxTypeDraft {
   l: string
   w: string
   h: string
+  /** Weight of one box in the draft's weight unit; blank means unknown. */
+  weight: string
   qty: string
   color: string
 }
@@ -51,10 +71,14 @@ export interface ScenarioImport {
   types: BoxTypeDraft[]
   /** The unit the sizes above are in; it becomes the app's unit. */
   unit: Unit
+  /** The unit the weights above are in; it becomes the app's weight unit. */
+  weightUnit: WeightUnit
   container: {
     containerType: ContainerType
     /** Custom interior size in `unit`; null when the file names a preset. */
     container: { l: string; w: string; h: string } | null
+    /** What a custom container may carry, in `weightUnit`; blank for no limit. */
+    maxWeight: string
     keepUpright: boolean
     mode: LoadMode
   } | null
@@ -69,9 +93,12 @@ export interface Draft {
   allocation: Allocation | null
   /** Custom interior dimensions. Kept while a preset is selected, so switching back restores them. */
   container: { l: string; w: string; h: string }
+  /** What a custom container may carry, in `weightUnit`; blank means no limit. */
+  maxWeight: string
   types: BoxTypeDraft[]
   keepUpright: boolean
   unit: Unit
+  weightUnit: WeightUnit
 }
 
 /**
@@ -87,7 +114,9 @@ export function scenarioShape(draft: Draft): string {
     draft.unit,
     draft.mode,
     draft.keepUpright,
-    draft.types.map((t) => [t.id, t.kind, t.catalogCode, t.l, t.w, t.h]),
+    payloadText(draft),
+    draft.weightUnit,
+    draft.types.map((t) => [t.id, t.kind, t.catalogCode, t.l, t.w, t.h, t.weight]),
   ])
 }
 
@@ -101,6 +130,12 @@ export function allocationOf(draft: Draft): Record<string, number>[] | undefined
 export function containerTexts(draft: Draft): { l: string; w: string; h: string } {
   const preset = presetFor(draft.containerType)
   return preset ? presetTexts(preset, draft.unit) : draft.container
+}
+
+/** What the container may carry: the preset's payload, or the typed one. */
+export function payloadText(draft: Draft): string {
+  const preset = presetFor(draft.containerType)
+  return preset ? presetPayloadText(preset, draft.weightUnit) : draft.maxWeight
 }
 
 /** Everything computed from the draft. */
@@ -200,6 +235,8 @@ export function draftFromScenario(scenario: Scenario, unit: Unit): Draft {
       w: s(scenario.container.w),
       h: s(scenario.container.h),
     },
+    maxWeight: '',
+    weightUnit: 'kg',
     keepUpright: scenario.keepUpright,
     unit,
     types: scenario.types.map((t) => ({
@@ -210,6 +247,7 @@ export function draftFromScenario(scenario: Scenario, unit: Unit): Draft {
       l: s(t.dims.l),
       w: s(t.dims.w),
       h: s(t.dims.h),
+      weight: t.weight ? s(t.weight / 1000) : '',
       qty: s(t.qty),
       color: t.color,
     })),
@@ -260,6 +298,17 @@ export function derive(draft: Draft): Derived {
     w: length('container.w', containerText.w),
     h: length('container.h', containerText.h),
   }
+  /** Blank is "not known", which the packer treats as no weight and no limit. */
+  const grams = (path: string, text: string): number => {
+    if (text.trim() === '') return 0
+    const v = parseLength(text)
+    if (v === null) {
+      issues[path] = 'Enter a number'
+      return 0
+    }
+    return toGrams(v, draft.weightUnit)
+  }
+  const maxWeight = grams('container.maxWeight', payloadText(draft))
   const unresolved = new Set<number>()
   const types: BoxType[] = draft.types.map((t, i) => {
     const { item, texts } = rows[i]!
@@ -269,7 +318,14 @@ export function derive(draft: Draft): Derived {
         ? 'Not in the catalog'
         : 'Pick a cabinet from the catalog'
       unresolved.add(i)
-      return { id: t.id, name: t.name.trim() || `Box ${i + 1}`, color: t.color, dims: NO_DIMS, qty }
+      return {
+        id: t.id,
+        name: t.name.trim() || `Box ${i + 1}`,
+        color: t.color,
+        dims: NO_DIMS,
+        weight: 0,
+        qty,
+      }
     }
     return {
       id: t.id,
@@ -280,6 +336,7 @@ export function derive(draft: Draft): Derived {
         w: length(`types[${i}].dims.w`, texts.w),
         h: length(`types[${i}].dims.h`, texts.h),
       },
+      weight: grams(`types[${i}].weight`, t.weight),
       qty,
     }
   })
@@ -300,6 +357,7 @@ export function derive(draft: Draft): Derived {
   const result = packMany(container, types, {
     keepUpright: draft.keepUpright,
     mode: draft.mode,
+    maxWeight,
     allocation: allocationOf(draft),
   })
   return { scale, issues, scenario, result, stale: false }
@@ -309,7 +367,7 @@ export function derive(draft: Draft): Derived {
 // Draft edits. Each returns a new draft and leaves the input untouched.
 
 export type ContainerKey = 'l' | 'w' | 'h'
-export type TypeField = 'name' | 'l' | 'w' | 'h' | 'qty'
+export type TypeField = 'name' | 'l' | 'w' | 'h' | 'weight' | 'qty'
 
 export function newTypeId(existing: readonly string[]): string {
   for (;;) {
@@ -361,6 +419,23 @@ export const edits = {
   clearAllocation(draft: Draft): Draft {
     return draft.allocation === null ? draft : { ...draft, allocation: null }
   },
+  setMaxWeight(draft: Draft, maxWeight: string): Draft {
+    return { ...draft, maxWeight }
+  },
+  /** Switching the weight unit converts every weight, like the length unit does. */
+  setWeightUnit(draft: Draft, weightUnit: WeightUnit): Draft {
+    if (weightUnit === draft.weightUnit) return draft
+    const convert = (text: string): string => {
+      const value = parseLength(text)
+      return value === null ? text : String(convertWeight(value, draft.weightUnit, weightUnit))
+    }
+    return {
+      ...draft,
+      weightUnit,
+      maxWeight: convert(draft.maxWeight),
+      types: draft.types.map((t) => ({ ...t, weight: convert(t.weight) })),
+    }
+  },
   setUnit(draft: Draft, unit: Unit): Draft {
     if (unit === draft.unit) return draft
     const convert = (text: string): string => {
@@ -395,6 +470,7 @@ export const edits = {
       l: '',
       w: '',
       h: '',
+      weight: '',
       qty: '1',
       color: nextColor(draft.types.map((t) => t.color)),
     }
@@ -404,10 +480,21 @@ export const edits = {
   setCatalogItem(draft: Draft, id: string, code: string): Draft {
     const item = findCatalogItem(code)
     const texts = item ? catalogTexts(item, draft.unit) : null
+    // A catalog weight fills the field; without one the row keeps what it had.
+    const weight = item ? catalogWeightText(item, draft.weightUnit) : ''
     return {
       ...draft,
       types: draft.types.map((t) =>
-        t.id === id ? { ...t, kind: 'catalog', catalogCode: code, name: code, ...texts } : t,
+        t.id === id
+          ? {
+              ...t,
+              kind: 'catalog',
+              catalogCode: code,
+              name: code,
+              ...texts,
+              weight: weight || t.weight,
+            }
+          : t,
       ),
     }
   },
@@ -455,7 +542,7 @@ export const edits = {
    * (which converts the container the import does not carry).
    */
   applyImport(draft: Draft, imported: ScenarioImport): Draft {
-    const converted = edits.setUnit(draft, imported.unit)
+    const converted = edits.setWeightUnit(edits.setUnit(draft, imported.unit), imported.weightUnit)
     const c = imported.container
     return {
       ...converted,
@@ -464,6 +551,7 @@ export const edits = {
         ? {
             containerType: c.containerType,
             container: c.container ?? converted.container,
+            maxWeight: c.maxWeight || converted.maxWeight,
             keepUpright: c.keepUpright,
             mode: c.mode,
           }
@@ -516,6 +604,11 @@ export function parseDraft(json: string): Draft | null {
     const d = raw as Record<string, unknown>
     const c = d.container as Record<string, unknown> | undefined
     if (!c || !isString(c.l) || !isString(c.w) || !isString(c.h)) return null
+    // Drafts saved before weights existed have none, which means unknown.
+    const maxWeight = d.maxWeight === undefined ? '' : d.maxWeight
+    if (!isString(maxWeight)) return null
+    const weightUnit = d.weightUnit === undefined ? 'kg' : d.weightUnit
+    if (!WEIGHT_UNITS.includes(weightUnit as WeightUnit)) return null
     if (!Array.isArray(d.types)) return null
     if (!UNITS.includes(d.unit as Unit)) return null
     // Drafts saved before container presets existed have no type: they are custom.
@@ -531,6 +624,8 @@ export function parseDraft(json: string): Draft | null {
       const r = t as Record<string, unknown>
       if (!r || !isString(r.id) || !isString(r.name) || !isString(r.color)) return null
       if (!isString(r.l) || !isString(r.w) || !isString(r.h) || !isString(r.qty)) return null
+      const weight = r.weight === undefined ? '' : r.weight
+      if (!isString(weight)) return null
       // Rows saved before the catalog existed are custom boxes.
       const kind = r.kind === undefined ? 'custom' : r.kind
       if (!BOX_KINDS.includes(kind as BoxKind)) return null
@@ -544,6 +639,7 @@ export function parseDraft(json: string): Draft | null {
         l: r.l,
         w: r.w,
         h: r.h,
+        weight,
         qty: r.qty,
         color: r.color,
       })
@@ -553,9 +649,11 @@ export function parseDraft(json: string): Draft | null {
       mode: mode as LoadMode,
       allocation,
       container: { l: c.l, w: c.w, h: c.h },
+      maxWeight,
       types,
       keepUpright: d.keepUpright === true,
       unit: d.unit as Unit,
+      weightUnit: weightUnit as WeightUnit,
     }
   } catch {
     return null

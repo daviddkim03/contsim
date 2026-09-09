@@ -14,7 +14,8 @@ Pick a standard shipping container (or type a custom interior size), add cabinet
   - **Optimize** fills each container as full as it can before opening the next, which leaves the last one emptier. It runs in a Web Worker with a run and time budget; no button to press, the result appears when it is ready.
 - 3D view with orbit and zoom, a container switcher, a layer slider to look inside, hover highlighting per box type, and a table view of the placements. It stays smooth with a thousand boxes in a container: each box type is drawn in a couple of calls rather than two per box.
 - The legend counts what is in the container you are looking at, and the count is editable: lower it and those boxes move to the next container, raise it and they come back, up to what the container can actually hold. **Reset split** hands the arrangement back to the loading mode.
-- Units: in, ft, cm, mm, m. Every size is a real measurement, so switching the unit converts all of them. All packing math happens on exact integers.
+- Weight: every container type carries its maximum payload (a 20 ft box takes 28,280 kg), and each cabinet can have a weight. A container is filled until it runs out of space **or** of payload, whichever comes first, so a heavy order needs more containers than the volume alone suggests. Weights come from the catalog, the import, or the box row.
+- Units: in, ft, cm, mm, m for sizes, kg or lb for weights. Every size is a real measurement, so switching a unit converts all of them. All packing math happens on exact integers.
 - **Import** an order from Excel or CSV: one row per cabinet with a code and a quantity, sizes only for boxes outside the catalog. contsim asks which unit the file's sizes are in, since a spreadsheet rarely says. An order template with a guide sheet is one click away, and the Excel export imports back too, container settings included. The scenario also persists in the browser.
 - **Export Excel** writes an .xlsx workbook with four sheets: a summary (status, container, totals), one row per container, one row per box type (requested, placed, left out, volumes), and one row per placed box (container, position, oriented size). Read and written by a small in-house reader and writer, no spreadsheet library.
 - No backend, no accounts, one runtime dependency (three.js).
@@ -31,9 +32,10 @@ Click **Import** in the Boxes panel and pick an .xlsx or .csv file. **Order temp
 2. `Code` (also accepted: Type, Item, SKU, Name, Box): the catalog code, for example `3036` or `DB18(4)`. Any other text makes a custom box named after it.
 3. `Qty` (also accepted: Quantity, Count, Pcs, Requested): a whole number.
 4. `Width`, `Depth`, `Height` (also accepted: W, D, H): only needed for boxes that are not in the catalog; ignored for catalog codes. Width runs along the container's length.
-5. Units: put the unit in the header, for example `Width (mm)`. Without one, the unit selected in the app applies.
-6. Rows with the same code are added together.
-7. Files: .xlsx (the first sheet is read) or .csv (comma, semicolon or tab separated). A workbook saved with Export Excel is recognized too: its Boxes sheet restores the order and its Summary sheet the container, unit and upright setting.
+5. `Weight` (also accepted: Wt, Mass): the weight of one box, so the load stays inside what a container may carry. Leave it out and the boxes count as weightless.
+6. Units: put the unit in the header, for example `Width (mm)` or `Weight (lb)`. Without one, contsim asks which unit the file uses.
+7. Rows with the same code are added together.
+8. Files: .xlsx (the first sheet is read) or .csv (comma, semicolon or tab separated). A workbook saved with Export Excel is recognized too: its Boxes sheet restores the order and its Summary sheet the container, units, payload and upright setting.
 
 Before anything changes, contsim shows what it found and asks which unit the file's sizes are in, defaulting to the unit named in a header if there is one. The app then switches to that unit, so the numbers on screen match the numbers in the file. A workbook saved by contsim states its own unit and is not asked about. Rows that cannot be used are listed under the buttons after the import, with the reason.
 
@@ -43,7 +45,7 @@ contsim ships with five placeholder cabinets so the app has something to show. T
 
 **From the app.** Make a box a custom size, give it a name and its dimensions, then press the star on its row. It joins the catalog under that name, is marked "saved" in the picker, and stays in the browser. Pressing the star again takes it back out.
 
-**From a spreadsheet**, which is the way to load a whole catalog at once. `data/catalog.xlsx` holds a header row `TYPE, W, D, H` (inches; further columns are ignored) and one cabinet per row. Replace the file and run
+**From a spreadsheet**, which is the way to load a whole catalog at once. `data/catalog.xlsx` holds a header row `TYPE, W, D, H` (inches) and one cabinet per row, optionally followed by `WEIGHT (kg)` or `WEIGHT (lb)`. Replace the file and run
 
 ```
 npm run catalog

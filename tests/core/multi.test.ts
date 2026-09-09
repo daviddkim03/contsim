@@ -299,6 +299,62 @@ describe('packMany', () => {
     expect(multiViolation(s, r)).toBeNull()
   })
 
+  it('opens another container when the payload runs out before the space does', () => {
+    // Twelve boxes fit the space easily; the payload only carries five at a time.
+    const s: Scenario = {
+      container: { l: 10, w: 10, h: 10 },
+      keepUpright: false,
+      types: [{ ...boxType('drum', 2, 2, 2, 12), weight: 200 }],
+    }
+    const light = packMany(s.container, s.types, { keepUpright: false })
+    expect(light.containers).toHaveLength(1)
+
+    const heavy = packMany(s.container, s.types, { keepUpright: false, maxWeight: 1000 })
+    expect(heavy.status).toBe('fits')
+    expect(heavy.containers.map((c) => c.placements.length)).toEqual([5, 5, 2])
+    expect(heavy.containers.map((c) => c.stats.weight)).toEqual([1000, 1000, 400])
+    expect(heavy.stats).toMatchObject({ weight: 2400, maxWeight: 1000, placed: 12 })
+    expect(multiViolation(s, heavy)).toBeNull()
+  })
+
+  it('evens out by count, keeping every container inside the payload', () => {
+    const s: Scenario = {
+      container: { l: 10, w: 10, h: 10 },
+      keepUpright: false,
+      types: [{ ...boxType('drum', 2, 2, 2, 12), weight: 200 }],
+    }
+    const even = packMany(s.container, s.types, {
+      keepUpright: false,
+      mode: 'even',
+      maxWeight: 1000,
+    })
+    expect(even.containers.map((c) => c.placements.length)).toEqual([4, 4, 4])
+    expect(even.containers.every((c) => c.stats.weight <= 1000)).toBe(true)
+    expect(multiViolation(s, even)).toBeNull()
+  })
+
+  it('reports a box no container may carry, and ships the rest', () => {
+    const s: Scenario = {
+      container: { l: 10, w: 10, h: 10 },
+      keepUpright: false,
+      types: [
+        { ...boxType('anvil', 2, 2, 2, 3), weight: 5000 },
+        { ...boxType('crate', 2, 2, 2, 4), weight: 100 },
+      ],
+    }
+    const r = packMany(s.container, s.types, { keepUpright: false, maxWeight: 1000 })
+    expect(r.status).toBe('impossible')
+    expect(r.impossibility).toEqual({
+      kind: 'overweight',
+      typeId: 'anvil',
+      weight: 5000,
+      maxWeight: 1000,
+    })
+    expect(r.unplaced).toEqual({ anvil: 3 })
+    expect(r.stats.placed).toBe(4)
+    expect(multiViolation(s, r)).toBeNull()
+  })
+
   it('keeps every invariant on random scenarios', () => {
     const random = mulberry32(7)
     const int = (lo: number, hi: number) => lo + Math.floor(random() * (hi - lo + 1))

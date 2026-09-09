@@ -6,7 +6,7 @@
 import type { CatalogItem } from '../catalog'
 import type { Dims } from '../core'
 import { catalogItems } from './catalogStore'
-import { convertLength, type Unit } from './units'
+import { convertLength, convertWeight, type Unit, type WeightUnit } from './units'
 
 export function inchesToUnit(inches: number, unit: Unit): number {
   return convertLength(inches, 'in', unit)
@@ -24,6 +24,11 @@ export function catalogDims(item: CatalogItem, unit: Unit): Dims {
 export function catalogTexts(item: CatalogItem, unit: Unit): { l: string; w: string; h: string } {
   const d = catalogDims(item, unit)
   return { l: String(d.l), w: String(d.w), h: String(d.h) }
+}
+
+/** The catalog's weight for an item in the chosen unit, or blank when it gives none. */
+export function catalogWeightText(item: CatalogItem, unit: WeightUnit): string {
+  return item.kg === undefined ? '' : String(convertWeight(item.kg, 'kg', unit))
 }
 
 /** "30 × 12 × 36 in": width x depth x height in the unit. */

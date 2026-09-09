@@ -6,7 +6,7 @@
 import { describeImpossibility, type MultiPackResult } from '../core'
 import { presetFor } from './presets'
 import type { Derived, Draft } from './state'
-import { formatLength, formatVolume } from './units'
+import { formatLength, formatVolume, formatWeight } from './units'
 
 export type Level = 'fits' | 'multi' | 'impossible' | 'limit' | 'invalid'
 
@@ -86,6 +86,7 @@ export function summarizeStatus(
       text: describeImpossibility(result.impossibility!, scenario.types, {
         length: (n) => formatLength(n, scale, draft.unit),
         volume: (n) => formatVolume(n, scale, draft.unit),
+        weight: (n) => formatWeight(n, draft.weightUnit),
       }),
       lines,
     }

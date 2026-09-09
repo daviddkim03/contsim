@@ -11,7 +11,7 @@ import {
   type Store,
 } from './state'
 import type { Panel } from './sidebar'
-import { formatNumber, formatVolume } from './units'
+import { formatNumber, formatVolume, formatWeight, type WeightUnit } from './units'
 
 const percent = (fraction: number) => `${(fraction * 100).toFixed(1)} %`
 
@@ -41,6 +41,7 @@ export function mountLegend(root: HTMLElement, store: Store): Panel {
         <div><dt>Fill</dt><dd data-stat="fill"></dd></div>
         <div><dt>Time</dt><dd data-stat="time"></dd></div>
         <div class="wide"><dt>Volume</dt><dd data-stat="volume"></dd></div>
+        <div class="wide" data-role="weight-stat"><dt>Weight</dt><dd data-stat="weight"></dd></div>
       </dl>
     </section>
     <section class="containers" hidden>
@@ -66,7 +67,9 @@ export function mountLegend(root: HTMLElement, store: Store): Panel {
     fill: query<HTMLElement>(root, '[data-stat="fill"]'),
     time: query<HTMLElement>(root, '[data-stat="time"]'),
     volume: query<HTMLElement>(root, '[data-stat="volume"]'),
+    weight: query<HTMLElement>(root, '[data-stat="weight"]'),
   }
+  const weightStat = query<HTMLElement>(root, '[data-role="weight-stat"]')
   const containersSection = query<HTMLElement>(root, '.containers')
   const containerList = query<HTMLElement>(root, '.container-list')
   const autoSplitButton = query<HTMLButtonElement>(root, '[data-action="auto-split"]')
@@ -113,9 +116,38 @@ export function mountLegend(root: HTMLElement, store: Store): Panel {
       const unitLabel = capacity.slice(capacity.indexOf(' '))
       setText(stats.volume, `${placedVolume.replace(unitLabel, '')} / ${capacity}`)
       setText(stats.time, `${result.stats.ms < 1 ? '<1' : Math.round(result.stats.ms)} ms`)
+      // Weight is only worth a line once some box has one.
+      const { weight, maxWeight } = result.stats
+      weightStat.hidden = weight === 0 && maxWeight === 0
+      const load = formatWeight(weight, draft.weightUnit)
+      setText(
+        stats.weight,
+        maxWeight > 0
+          ? `${load.replace(` ${draft.weightUnit}`, '')} / ${formatWeight(maxWeight * Math.max(n, 1), draft.weightUnit)}`
+          : load,
+      )
     } else {
       for (const el of Object.values(stats)) setText(el, '-')
     }
+  }
+
+  /** A second line and bar for the load, when weights are in play. */
+  function weightLine(weight: number, maxWeight: number, unit: WeightUnit): HTMLElement[] {
+    if (weight === 0 && maxWeight === 0) return []
+    const text = h('span', {
+      class: 'container-meta wide',
+      text:
+        maxWeight > 0
+          ? `${formatWeight(weight, unit).replace(` ${unit}`, '')} / ${formatWeight(maxWeight, unit)}`
+          : formatWeight(weight, unit),
+    })
+    if (maxWeight === 0) return [text]
+    const bar = h('span', { class: 'fill-bar weight' })
+    const value = h('span', { class: 'fill-bar-value' })
+    value.style.width = `${Math.min(100, Math.round((weight / maxWeight) * 100))}%`
+    bar.append(value)
+    if (weight > maxWeight * 0.98) bar.classList.add('heavy')
+    return [text, bar]
   }
 
   function renderContainers(state: AppState): void {
@@ -147,6 +179,7 @@ export function mountLegend(root: HTMLElement, store: Store): Panel {
               text: `${c.placements.length} boxes · ${percent(c.stats.fill)}`,
             }),
             h('span', { class: 'fill-bar' }, [value]),
+            ...weightLine(c.stats.weight, result.stats.maxWeight, state.draft.weightUnit),
           ],
         )
       }),

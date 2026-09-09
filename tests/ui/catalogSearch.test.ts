@@ -20,7 +20,7 @@ describe('catalog', () => {
       expect(c.d).toBeGreaterThan(0)
       expect(c.h).toBeGreaterThan(0)
     }
-    expect(findCatalogItem('3036')).toEqual({ code: '3036', w: 30, d: 12, h: 36 })
+    expect(findCatalogItem('3036')).toMatchObject({ code: '3036', w: 30, d: 12, h: 36, kg: 25 })
     expect(findCatalogItem('nope')).toBeNull()
   })
 

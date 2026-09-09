@@ -1,8 +1,10 @@
-import { insideContainer, orientations, volume } from './geometry'
+import { boxWeight, insideContainer, orientations, volume } from './geometry'
 import type { BoxType, Container, Dims, Impossibility } from './types'
 
 export interface FeasibilityOptions {
   keepUpright: boolean
+  /** What the container may carry; 0 or missing means no limit. */
+  maxWeight?: number
 }
 
 const ORIGIN = { x: 0, y: 0, z: 0 }
@@ -24,6 +26,11 @@ export function findImpossibility(
       insideContainer(ORIGIN, s, container),
     )
     if (!fitsSomehow) return { kind: 'oversize', typeId: t.id }
+    const weight = boxWeight(t)
+    const maxWeight = opts.maxWeight ?? 0
+    if (maxWeight > 0 && weight > maxWeight) {
+      return { kind: 'overweight', typeId: t.id, weight, maxWeight }
+    }
   }
 
   const containerVolume = volume(container)
@@ -73,9 +80,10 @@ export function maxOfTypeAlone(container: Container, dims: Dims, keepUpright: bo
 export interface ImpossibilityFormat {
   length: (n: number) => string
   volume: (n: number) => string
+  weight: (n: number) => string
 }
 
-const plain: ImpossibilityFormat = { length: String, volume: String }
+const plain: ImpossibilityFormat = { length: String, volume: String, weight: String }
 
 export function describeImpossibility(
   imp: Impossibility,
@@ -93,6 +101,8 @@ export function describeImpossibility(
         : ''
       return `${nameOf(imp.typeId)}${dims} does not fit in the container in any allowed orientation.`
     }
+    case 'overweight':
+      return `${nameOf(imp.typeId)} weighs ${fmt.weight(imp.weight)}, more than the container may carry (${fmt.weight(imp.maxWeight)}).`
     case 'volume':
       return `Total box volume ${fmt.volume(imp.boxVolume)} exceeds the container volume ${fmt.volume(imp.containerVolume)}.`
     case 'upper-bound':

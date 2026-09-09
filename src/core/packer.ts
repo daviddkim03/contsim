@@ -1,5 +1,13 @@
 import { findImpossibility } from './feasibility'
-import { covered, insideContainer, orientations, overlaps, sizeVolume, volume } from './geometry'
+import {
+  boxWeight,
+  covered,
+  insideContainer,
+  orientations,
+  overlaps,
+  sizeVolume,
+  volume,
+} from './geometry'
 import { expandTypes, orderItems } from './ordering'
 import type {
   Box,
@@ -37,6 +45,7 @@ export function pack(
   const opts: PackOptions = {
     keepUpright: options.keepUpright ?? DEFAULT_PACK_OPTIONS.keepUpright,
     order: options.order ?? DEFAULT_PACK_OPTIONS.order,
+    maxWeight: options.maxWeight ?? 0,
     skipChecks: options.skipChecks ?? false,
   }
 
@@ -64,12 +73,16 @@ export function pack(
         fill: 0,
         placed: 0,
         requested,
+        weight: 0,
         ms: performance.now() - start,
       },
     }
   }
 
   const items = orderItems(expandTypes(types), opts.order)
+  const weights = new Map(types.map((t) => [t.id, boxWeight(t)]))
+  const maxWeight = opts.maxWeight ?? 0
+  let weight = 0
   const placements: Placement[] = []
   const unplaced: Record<string, number> = {}
   let eps: Point[] = [{ x: 0, y: 0, z: 0 }]
@@ -81,6 +94,13 @@ export function pack(
   for (const item of items) {
     const key = `${item.dims.l},${item.dims.w},${item.dims.h}`
     if (stuck.has(key)) {
+      unplaced[item.typeId] = (unplaced[item.typeId] ?? 0) + 1
+      continue
+    }
+    // Too heavy for what is left of the payload. A lighter box may still go
+    // in, so this is not a dead size; leave `stuck` alone.
+    const itemWeight = weights.get(item.typeId) ?? 0
+    if (maxWeight > 0 && weight + itemWeight > maxWeight) {
       unplaced[item.typeId] = (unplaced[item.typeId] ?? 0) + 1
       continue
     }
@@ -99,6 +119,7 @@ export function pack(
 
     const box: Placement = { typeId: item.typeId, ...hit.point, ...hit.size }
     placements.push(box)
+    weight += itemWeight
     stuck.clear()
     eps = nextExtremePoints(eps, hit.point, box, placements, container)
   }
@@ -114,6 +135,7 @@ export function pack(
       fill: placedVolume / containerVolume,
       placed: placements.length,
       requested,
+      weight,
       ms: performance.now() - start,
     },
   }

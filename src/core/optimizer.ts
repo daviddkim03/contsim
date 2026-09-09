@@ -13,6 +13,8 @@ export interface OptimizeProgress {
 export interface OptimizeOptions {
   keepUpright: boolean
   objective: Objective
+  /** What the container may carry; 0 or missing means no limit. */
+  maxWeight?: number
   /** Upper bound on packer runs. Default 200. */
   maxRuns?: number
   /** Called after every packer run. Return false to stop early with the best plan so far. */
@@ -81,7 +83,7 @@ export function optimize(
     const result = pack(
       container,
       active.map((t) => ({ ...t, qty: kept[t.id] ?? 0 })),
-      { keepUpright: options.keepUpright, order, skipChecks },
+      { keepUpright: options.keepUpright, maxWeight: options.maxWeight, order, skipChecks },
     )
     const report = options.onProgress?.({
       runs,

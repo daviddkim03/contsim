@@ -80,7 +80,8 @@ test('opens on the example order, which needs two containers', async ({ page }) 
 })
 
 test('the loading mode decides how the boxes are spread, and sticks', async ({ page }) => {
-  const meta = (index: number) => page.locator('.container-row .container-meta').nth(index)
+  const meta = (index: number) =>
+    page.locator('.container-row').nth(index).locator('.container-meta').first()
   /** Waits out the recompute and, in Optimize mode, the worker. */
   const expectSplit = async (first: string, second: string) => {
     await expect(meta(0)).toHaveText(first, { timeout: 15_000 })
@@ -317,12 +318,17 @@ test('saving to the catalog refuses a name that is taken or a box without a size
 
 test('the legend counts the boxes in the container on screen, and moves them', async ({ page }) => {
   const count = (index: number) => page.locator('.legend-count input').nth(index)
-  const meta = (index: number) => page.locator('.container-row .container-meta').nth(index)
+  const meta = (index: number) =>
+    page.locator('.container-row').nth(index).locator('.container-meta').first()
   const reset = page.locator('[data-action="auto-split"]')
   // The example is evened out, so each container holds half of every type.
   await expect(count(0)).toHaveValue('14')
   await expect(count(4)).toHaveValue('7')
   await expect(reset).toBeHidden()
+  // The catalog gives every cabinet a weight, so each container shows its load.
+  await expect(page.locator('.container-row').first().locator('.container-meta').nth(1)).toHaveText(
+    '2,513 / 28,280 kg',
+  )
 
   // Fewer of the first cabinet here means more of it in the next container.
   await count(0).fill('4')
@@ -347,6 +353,42 @@ test('the legend counts the boxes in the container on screen, and moves them', a
   await reset.click()
   await expect(reset).toBeHidden()
   await expect(count(0)).toHaveValue('14')
+})
+
+test('the payload limit fills containers by weight as well as by space', async ({ page }) => {
+  const weight = (index: number) => row(page, index).locator('[data-field="weight"]')
+  const payload = page.locator('[data-field="maxWeight"]')
+  const load = (index: number) =>
+    page.locator('.container-row').nth(index).locator('.container-meta').nth(1)
+  // A 20 ft container carries 28,280 kg, and the catalog gives every cabinet a weight.
+  await expect(payload).toHaveValue('28280')
+  await expect(payload).toBeDisabled()
+  await expect(weight(0)).toHaveValue('27')
+  await expect(page.locator('[data-stat="weight"]')).toHaveText('5,026 / 56,560 kg')
+
+  // Heavy cabinets: the payload runs out before the space does.
+  for (const i of [0, 1, 2, 3, 4]) await weight(i).fill('400')
+  await expect(page.locator('[data-stat="containers"]')).toHaveText('3')
+  await expect(load(0)).toContainText('/ 28,280 kg')
+  const first = await load(0).innerText()
+  expect(Number(first.split('/')[0]!.replace(/[^0-9]/g, ''))).toBeLessThanOrEqual(28280)
+  await expect(page.locator('[data-stat="placed"]')).toHaveText('140 / 140')
+
+  // One cabinet heavier than any container can carry.
+  await weight(0).fill('40000')
+  await expect(badge(page)).toHaveText('Impossible')
+  await expect(page.locator('.message')).toHaveText(
+    '18 weighs 40,000 kg, more than the container may carry (28,280 kg).',
+  )
+
+  // In pounds the same limit reads differently, and the weights come along.
+  await weight(0).fill('27')
+  await page.locator('[data-field="weightUnit"]').selectOption('lb')
+  await expect(payload).toHaveValue('62347')
+  await expect(weight(0)).toHaveValue('59.525')
+  await expect(
+    page.locator('.container-row').first().locator('.container-meta').nth(1),
+  ).toContainText('lb')
 })
 
 test('the table view lists every placement in every container', async ({ page }) => {

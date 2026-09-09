@@ -15,7 +15,7 @@ import { nextColor } from './palette'
 import { CONTAINER_PRESETS } from './presets'
 import type { CellValue, Row, SheetRows } from './spreadsheet'
 import { newTypeId, type BoxTypeDraft, type ScenarioImport } from './state'
-import { UNITS, convertLength, type Unit } from './units'
+import { UNITS, convertLength, convertWeight, type Unit, type WeightUnit } from './units'
 import type { Workbook } from './xlsx'
 
 export const ORDER_TEMPLATE_FILENAME = 'contsim-order-template.xlsx'
@@ -26,12 +26,13 @@ export const ORDER_FORMAT_GUIDE: readonly string[] = [
   'Code (also accepted: Type, Item, SKU, Name, Box): a code from the catalog, for example 3036. Any other text makes a custom box named after it, which you can save into the catalog from its row.',
   'Qty (also accepted: Quantity, Count, Pcs, Requested): a whole number.',
   "Width, Depth, Height (also accepted: W, D, H): only needed for boxes that are not in the catalog; ignored for catalog codes. Width runs along the container's length.",
-  'Units: put the unit in the header, for example "Width (mm)". Without one, the unit selected in the app applies.',
+  'Weight (also accepted: Wt, Mass): the weight of one box, so the load stays inside what a container may carry. Leave it out and the boxes count as weightless.',
+  'Units: put the unit in the header, for example "Width (mm)" or "Weight (lb)". Without one, contsim asks which unit the file uses.',
   'Rows with the same code are added together.',
   'Files: .xlsx (the first sheet is read) or .csv (comma, semicolon or tab separated). A workbook saved with Export Excel is recognized too: its Boxes sheet restores the order and its Summary sheet the container, unit and upright setting.',
 ]
 
-type Column = 'code' | 'qty' | 'first' | 'second' | 'third' | 'color'
+type Column = 'code' | 'qty' | 'first' | 'second' | 'third' | 'weight' | 'color'
 
 /** Header words per column. "length" and "width" both mean the first size unless both appear (see importOrder). */
 const HEADERS: Record<Column, readonly string[]> = {
@@ -53,6 +54,7 @@ const HEADERS: Record<Column, readonly string[]> = {
   first: ['w', 'width', 'l', 'length'],
   second: ['d', 'depth'],
   third: ['h', 'height'],
+  weight: ['weight', 'wt', 'mass', 'weighteach', 'weightper', 'weightperbox', 'unitweight'],
   color: ['color', 'colour'],
 }
 
@@ -68,11 +70,25 @@ const UNIT_WORDS: Record<string, Unit> = {
   m: 'm',
 }
 
+const WEIGHT_UNIT_WORDS: Record<string, WeightUnit> = {
+  kg: 'kg',
+  kgs: 'kg',
+  kilo: 'kg',
+  kilos: 'kg',
+  kilogram: 'kg',
+  kilograms: 'kg',
+  lb: 'lb',
+  lbs: 'lb',
+  pound: 'lb',
+  pounds: 'lb',
+}
+
 export interface Header {
   column: Column
   /** The header word that matched, e.g. "length". */
   word: string
   unit: Unit | null
+  weightUnit: WeightUnit | null
 }
 
 /** "Width (mm)" -> first size in mm; "QTY" -> qty; anything unknown -> null. */
@@ -80,16 +96,19 @@ export function parseHeader(cell: CellValue | undefined): Header | null {
   if (cell === undefined) return null
   let text = String(cell).toLowerCase().trim()
   let unit: Unit | null = null
+  let weightUnit: WeightUnit | null = null
   const inParens = /\(([^)]*)\)/.exec(text)
   const unitText =
-    inParens?.[1]?.trim() ?? /\b(in|inch|inches|ft|feet|foot|cm|mm|m)$/.exec(text)?.[1]
-  if (unitText && UNIT_WORDS[unitText]) {
-    unit = UNIT_WORDS[unitText]!
+    inParens?.[1]?.trim() ??
+    /\b(in|inch|inches|ft|feet|foot|cm|mm|m|kg|kgs|lb|lbs|pound|pounds)$/.exec(text)?.[1]
+  if (unitText && (UNIT_WORDS[unitText] ?? WEIGHT_UNIT_WORDS[unitText])) {
+    unit = UNIT_WORDS[unitText] ?? null
+    weightUnit = WEIGHT_UNIT_WORDS[unitText] ?? null
     text = text.replace(inParens?.[0] ?? unitText, '')
   }
   const word = text.replace(/[^a-z]/g, '')
   for (const column of Object.keys(HEADERS) as Column[]) {
-    if (HEADERS[column].includes(word)) return { column, word, unit }
+    if (HEADERS[column].includes(word)) return { column, word, unit, weightUnit }
   }
   return null
 }
@@ -125,6 +144,10 @@ export interface Imported extends ScenarioImport {
   notes: string[]
   /** The unit named by a size column header, when there was one. */
   detectedUnit: Unit | null
+  /** The unit named by the weight column header, when there was one. */
+  detectedWeightUnit: WeightUnit | null
+  /** Whether any row brought a weight, so the app knows whether to ask about it. */
+  hasWeights: boolean
 }
 
 export type ImportParse = { ok: true; imported: Imported } | { ok: false; error: string }
@@ -135,6 +158,7 @@ interface Found {
   index: number
   word: string
   unit: Unit | null
+  weightUnit: WeightUnit | null
 }
 
 /**
@@ -145,6 +169,7 @@ interface Found {
 export function importOrder(
   rows: Row[],
   unit: Unit,
+  weightUnit: WeightUnit,
   existing: readonly BoxTypeDraft[],
 ): ImportParse {
   let headerRow = -1
@@ -157,16 +182,20 @@ export function importOrder(
       // Length and Width side by side is the app's own naming: length first, width second.
       if (h.column === 'first' && found.first && found.first.word !== h.word) {
         const lengthFirst = ['l', 'length'].includes(h.word) ? h : found.first
-        const widthSecond = lengthFirst === h ? found.first : { index, word: h.word, unit: h.unit }
+        const widthSecond =
+          lengthFirst === h ? found.first : { index, word: h.word, unit: h.unit, weightUnit: null }
         found.first = {
           index: lengthFirst === h ? index : found.first.index,
           word: lengthFirst.word,
           unit: lengthFirst.unit,
+          weightUnit: null,
         }
         found.second ??= widthSecond
         return
       }
-      if (!found[h.column]) found[h.column] = { index, word: h.word, unit: h.unit }
+      if (!found[h.column]) {
+        found[h.column] = { index, word: h.word, unit: h.unit, weightUnit: h.weightUnit }
+      }
     })
     if (found.code && found.qty) {
       headerRow = r
@@ -230,12 +259,25 @@ export function importOrder(
     }
     const colorText = columns.color ? cellText(row[columns.color.index]) : ''
     const color = /^#[0-9a-f]{6}$/i.test(colorText) ? colorText.toLowerCase() : null
+    // A header naming its own unit wins; otherwise the weight is in the app's.
+    const weightColumn = columns.weight
+    const weighs = weightColumn ? parseLength(row[weightColumn.index]) : null
+    const weightText =
+      weighs === null || weighs <= 0
+        ? ''
+        : String(convertWeight(weighs, weightColumn?.weightUnit ?? weightUnit, weightUnit))
 
     const item: CatalogItem | null = findCatalogItem(code)
     if (item) {
       add(
         `catalog:${item.code}`,
-        { kind: 'catalog', catalogCode: item.code, name: item.code, ...catalogTexts(item, unit) },
+        {
+          kind: 'catalog',
+          catalogCode: item.code,
+          name: item.code,
+          ...catalogTexts(item, unit),
+          weight: weightText,
+        },
         qty,
         color,
         item.code,
@@ -252,7 +294,7 @@ export function importOrder(
       const [l, w, h] = size.map(String) as [string, string, string]
       add(
         `custom:${code}|${l}|${w}|${h}`,
-        { kind: 'custom', catalogCode: '', name: code, l, w, h },
+        { kind: 'custom', catalogCode: '', name: code, l, w, h, weight: weightText },
         qty,
         color,
         `"${code}"`,
@@ -271,17 +313,33 @@ export function importOrder(
   const detectedUnit = sizeColumns.find((c) => c?.unit)?.unit ?? null
   return {
     ok: true,
-    imported: { types, boxes, skipped, notes, unit, detectedUnit, container: null },
+    imported: {
+      types,
+      boxes,
+      skipped,
+      notes,
+      unit,
+      weightUnit,
+      detectedUnit,
+      detectedWeightUnit: columns.weight?.weightUnit ?? null,
+      hasWeights: types.some((t) => t.weight !== ''),
+      container: null,
+    },
   }
 }
 
 export interface Summary {
   container: ImportedContainer
   unit: Unit
+  weightUnit: WeightUnit
 }
 
 /** The container settings written by the Excel export's Summary sheet, if they are all there. */
-export function readSummary(rows: Row[], fallbackUnit: Unit): Summary | null {
+export function readSummary(
+  rows: Row[],
+  fallbackUnit: Unit,
+  fallbackWeightUnit: WeightUnit,
+): Summary | null {
   const values = new Map<string, CellValue | undefined>()
   for (const row of rows) {
     const key = cellText(row[0]).toLowerCase()
@@ -289,6 +347,10 @@ export function readSummary(rows: Row[], fallbackUnit: Unit): Summary | null {
   }
   const unitText = cellText(values.get('unit'))
   const unit = UNITS.includes(unitText as Unit) ? (unitText as Unit) : fallbackUnit
+  const weightText = cellText(values.get('weight unit')).toLowerCase()
+  const weightUnit = weightText === 'kg' || weightText === 'lb' ? weightText : fallbackWeightUnit
+  const payload = parseLength(values.get('payload per container'))
+  const maxWeight = payload !== null && payload > 0 ? String(payload) : ''
   const typeName = cellText(values.get('container type')).toLowerCase()
   if (!typeName) return null
   const preset = CONTAINER_PRESETS.find((p) => p.name.toLowerCase() === typeName)
@@ -297,7 +359,11 @@ export function readSummary(rows: Row[], fallbackUnit: Unit): Summary | null {
   const mode: LoadMode =
     cellText(values.get('loading mode')).toLowerCase() === 'optimize' ? 'optimize' : 'even'
   if (preset) {
-    return { container: { containerType: preset.id, container: null, keepUpright, mode }, unit }
+    return {
+      container: { containerType: preset.id, container: null, maxWeight, keepUpright, mode },
+      unit,
+      weightUnit,
+    }
   }
 
   const dims = ['length', 'width', 'height'].map((side) => {
@@ -310,10 +376,12 @@ export function readSummary(rows: Row[], fallbackUnit: Unit): Summary | null {
     container: {
       containerType: 'custom',
       container: { l: dims[0], w: dims[1], h: dims[2] },
+      maxWeight,
       keepUpright,
       mode,
     },
     unit,
+    weightUnit,
   }
 }
 
@@ -324,34 +392,48 @@ export function readSummary(rows: Row[], fallbackUnit: Unit): Summary | null {
 export function importWorkbook(
   sheets: SheetRows[],
   unit: Unit,
+  weightUnit: WeightUnit,
   existing: readonly BoxTypeDraft[],
 ): ImportParse {
   const byName = (name: string) => sheets.find((s) => s.name.trim().toLowerCase() === name)
   const boxes = byName('boxes')
   const summary = byName('summary')
   if (boxes && summary) {
-    const read = readSummary(summary.rows, unit)
-    const parsed = importOrder(boxes.rows, read?.unit ?? unit, existing)
+    const read = readSummary(summary.rows, unit, weightUnit)
+    const parsed = importOrder(
+      boxes.rows,
+      read?.unit ?? unit,
+      read?.weightUnit ?? weightUnit,
+      existing,
+    )
     if (!parsed.ok) return parsed
     return { ok: true, imported: { ...parsed.imported, container: read?.container ?? null } }
   }
-  return importOrder(sheets[0]!.rows, unit, existing)
+  return importOrder(sheets[0]!.rows, unit, weightUnit, existing)
 }
 
 /** The template workbook: an Order sheet with examples and a Guide sheet with the rules. */
-export function orderTemplate(unit: Unit): Workbook {
+export function orderTemplate(unit: Unit, weightUnit: WeightUnit = 'kg'): Workbook {
   const size = (inches: number) => convertLength(inches, 'in', unit)
   return {
     sheets: [
       {
         name: 'Order',
-        header: ['Code', 'Qty', `Width (${unit})`, `Depth (${unit})`, `Height (${unit})`, 'Note'],
-        rows: [
-          ['3036', 4, null, null, null, 'A catalog code: the size comes from the catalog'],
-          ['2442', 2, null, null, null, ''],
-          ['Crate', 1, size(40), size(30), size(20), 'Not in the catalog: give the size'],
+        header: [
+          'Code',
+          'Qty',
+          `Width (${unit})`,
+          `Depth (${unit})`,
+          `Height (${unit})`,
+          `Weight (${weightUnit})`,
+          'Note',
         ],
-        widths: [14, 8, 12, 12, 12, 50],
+        rows: [
+          ['3036', 4, null, null, null, 34, 'A catalog code: the size comes from the catalog'],
+          ['2442', 2, null, null, null, null, 'Leave the weight out if you do not track it'],
+          ['Crate', 1, size(40), size(30), size(20), 120, 'Not in the catalog: give the size'],
+        ],
+        widths: [14, 8, 12, 12, 12, 13, 50],
       },
       {
         name: 'Guide',

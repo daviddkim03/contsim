@@ -223,11 +223,35 @@ ul {
   box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.25);
 }
 
+.unit-selects {
+  display: flex;
+  gap: 4px;
+}
+
 .unit-select {
   width: auto !important;
   height: 26px !important;
   padding: 0 4px !important;
   font-size: 12px;
+}
+
+/* What the container may carry, beside its size. */
+.payload {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--sidebar-muted);
+}
+
+.payload input {
+  text-align: right;
+}
+
+.payload-unit {
+  min-width: 16px;
 }
 
 .container-type {
@@ -300,11 +324,29 @@ button.star.on:hover {
   color: var(--accent);
 }
 
+.row-size {
+  margin-bottom: 8px;
+}
+
 .row-bottom {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
+}
+
+/* Weight of one box, beside its quantity. */
+.row-weight {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--sidebar-muted);
+}
+
+.row-weight input {
+  text-align: right;
 }
 
 .dims.compact input {
@@ -755,6 +797,19 @@ button.primary:disabled {
   overflow: hidden;
   border-radius: 2px;
   background: var(--stage-bg);
+}
+
+.container-meta.wide {
+  grid-column: 1 / -1;
+  margin-top: 2px;
+}
+
+.fill-bar.weight .fill-bar-value {
+  background: var(--multi);
+}
+
+.fill-bar.weight.heavy .fill-bar-value {
+  background: var(--not-found);
 }
 
 .fill-bar-value {

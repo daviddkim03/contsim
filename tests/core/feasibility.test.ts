@@ -161,10 +161,25 @@ describe('describeImpossibility', () => {
     ).toBe('At most 1 of Box A can fit in an empty container; 2 requested.')
   })
 
-  it('formats lengths and volumes with the given formatters', () => {
+  it('reports a box heavier than the container may carry', () => {
+    const types = [
+      { id: 'slab', name: 'Slab', dims: { l: 1, w: 1, h: 1 }, qty: 2, color: '#888', weight: 2000 },
+    ]
+    expect(findImpossibility({ l: 10, w: 10, h: 10 }, types, { keepUpright: false })).toBeNull()
+    expect(
+      findImpossibility({ l: 10, w: 10, h: 10 }, types, { keepUpright: false, maxWeight: 1500 }),
+    ).toEqual({ kind: 'overweight', typeId: 'slab', weight: 2000, maxWeight: 1500 })
+    // A load of several boxes over the limit is not impossible: they ship apart.
+    expect(
+      findImpossibility({ l: 10, w: 10, h: 10 }, types, { keepUpright: false, maxWeight: 2500 }),
+    ).toBeNull()
+  })
+
+  it('formats lengths, volumes and weights with the given formatters', () => {
     const fmt = {
       length: (n: number) => `${n / 10} in`,
       volume: (n: number) => `${n / 1000} cu in`,
+      weight: (n: number) => `${n / 1000} kg`,
     }
     expect(describeImpossibility({ kind: 'oversize', typeId: 'a' }, types, fmt)).toContain(
       '(1.1 in x 0.1 in x 0.1 in)',
@@ -172,6 +187,13 @@ describe('describeImpossibility', () => {
     expect(
       describeImpossibility({ kind: 'volume', boxVolume: 70, containerVolume: 64 }, types, fmt),
     ).toBe('Total box volume 0.07 cu in exceeds the container volume 0.064 cu in.')
+    expect(
+      describeImpossibility(
+        { kind: 'overweight', typeId: 'a', weight: 900_000, maxWeight: 500_000 },
+        types,
+        fmt,
+      ),
+    ).toBe('Box A weighs 900 kg, more than the container may carry (500 kg).')
   })
 
   it('falls back to the id for an unknown type', () => {

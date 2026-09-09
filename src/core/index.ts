@@ -1,5 +1,13 @@
 export type * from './types'
-export { covered, insideContainer, orientations, overlaps, sizeVolume, volume } from './geometry'
+export {
+  boxWeight,
+  covered,
+  insideContainer,
+  orientations,
+  overlaps,
+  sizeVolume,
+  volume,
+} from './geometry'
 export {
   describeImpossibility,
   findImpossibility,

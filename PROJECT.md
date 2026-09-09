@@ -24,7 +24,7 @@ Added on 2026-09-03: container presets and a cabinet catalog with a searchable p
 
 Added on 2026-09-08: the import asks which unit the file's sizes are in and switching units converts every size (sections 2 and 5.7); a custom box can be saved into the catalog and taken back out (section 5.5); the shipped catalog is five placeholders instead of the 174 sample rows, since the real one is loaded from a spreadsheet or built up in the app. Then the 3D view was made to scale to a thousand boxes in a container (section 5.8).
 
-Added on 2026-09-09: two loading modes, Even (the default, spreading the boxes so every container holds close to the same number) and Optimize (the previous behaviour), in sections 4.4 and 5.6; and editable per-container counts in the legend (section 5.6).
+Added on 2026-09-09: two loading modes, Even (the default, spreading the boxes so every container holds close to the same number) and Optimize (the previous behaviour), in sections 4.4 and 5.6; editable per-container counts in the legend (section 5.6); and weight, with a payload per container type and a weight per box (section 5.9).
 
 ## 1. Goals and non-goals
 
@@ -387,6 +387,12 @@ The panels also stopped re-rendering on view changes that do not concern them: t
 
 Finally the optimizer takes a wall-clock budget as well as a run count. A packer run costs a fraction of a millisecond for a few large boxes and tens of milliseconds for hundreds of small ones, so a run count alone let a dense order spend five seconds of a core on every edit.
 
+### 5.9 Weight
+
+A container runs out of payload as well as of space. Each preset carries its maximum payload in kilograms (ISO maximum gross less tare, so a 20 ft box takes 28,280 kg and a 40 ft one 26,680; roads often allow less, which is why Custom size takes any figure), and each box type can carry the weight of one box. The packer keeps a running total and passes over any box that would take the container past its payload, leaving it for the next one - a lighter box may still go in, so a skipped box does not close the container. A box heavier than a container can carry ships nowhere: that is an `overweight` impossibility, named in the status line, with the rest of the order still packed.
+
+Weights reach the core as whole grams so they compare exactly, like lengths. The UI keeps them in kilograms or pounds (a second unit selector beside the length one, converting on a switch), takes them from the catalog when it has them (an optional `WEIGHT` column in `data/catalog.xlsx`), from a `Weight` column on import, or typed into the box row. A blank weight is unknown, which the packer treats as weightless; a payload of 0 means no limit, so an order without weights packs exactly as it did before weights existed. The status panel and each container in the list show the load against the payload, and the Excel export carries the weight unit, the payload, a weight per container with its share, and a weight per box type.
+
 ## 6. Tech stack
 
 - TypeScript + Vite. Vanilla DOM for the UI: one `render(state)` function per panel, event delegation, a single immutable state object. If the UI grows, Preact or Svelte are fine; keep `src/core` framework-free either way.
@@ -425,7 +431,7 @@ contsim/
       units.ts            unit labels, integer scaling at the boundary, formatting
       dom.ts              tiny DOM helpers (h, setValue, setInvalid, download)
       describe.ts         status wording shared by the status panel and the report
-      presets.ts          standard container interiors and unit conversion (5.5)
+      presets.ts          standard container interiors, payloads and unit conversion (5.5, 5.9)
       catalogStore.ts     built-in plus saved catalog items, persisted (5.5)
       catalogSearch.ts    catalog unit conversion and search ranking (5.5)
       combobox.ts         searchable dropdown used by the box rows (5.5)

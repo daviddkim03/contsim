@@ -56,6 +56,10 @@ describe('buildReport', () => {
       'Container width (in)': 92.6,
       'Container height (in)': 94.2,
       'Keep boxes upright': 'No',
+      'Weight unit': 'kg',
+      'Payload per container': 28280,
+      // The placeholder catalog gives every cabinet a weight.
+      'Weight loaded': 5026,
       'Containers needed': result.containers.length,
       'Boxes requested': 140,
       'Boxes placed': 140,
@@ -63,7 +67,14 @@ describe('buildReport', () => {
       'Fill, all containers': { percent: result.stats.fill },
       'Placements sheet': expect.stringContaining('Lengths are in inches.'),
     })
-    expect(containers!.header).toEqual(['Container', 'Boxes', 'Fill', 'Placed volume (cu ft)'])
+    expect(containers!.header).toEqual([
+      'Container',
+      'Boxes',
+      'Fill',
+      'Placed volume (cu ft)',
+      'Weight (kg)',
+      'Share of payload',
+    ])
     expect(containers!.rows).toHaveLength(result.containers.length)
     expect(containers!.rows[0]!.slice(0, 3)).toEqual([
       1,

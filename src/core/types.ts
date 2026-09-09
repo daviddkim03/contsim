@@ -37,6 +37,12 @@ export interface BoxType {
   dims: Dims
   qty: number
   color: string
+  /**
+   * Weight of one box, in whatever whole unit the caller uses for
+   * PackOptions.maxWeight (the app uses grams). 0 or missing means unknown,
+   * which is the same as weightless as far as the packer is concerned.
+   */
+  weight?: number
 }
 
 export interface Placement extends Point, Size {
@@ -60,6 +66,7 @@ export type Status = 'fits' | 'not-found' | 'impossible'
 /** Structured reason for an impossible scenario. The UI formats it with its own units. */
 export type Impossibility =
   | { kind: 'oversize'; typeId: string }
+  | { kind: 'overweight'; typeId: string; weight: number; maxWeight: number }
   | { kind: 'volume'; boxVolume: number; containerVolume: number }
   | { kind: 'upper-bound'; typeId: string; qty: number; maxAlone: number }
 
@@ -70,6 +77,8 @@ export interface PackStats {
   fill: number
   placed: number
   requested: number
+  /** Weight of the placed boxes; 0 when no box has one. */
+  weight: number
   ms: number
 }
 
@@ -94,6 +103,12 @@ export interface PackOptions {
   /** Only allow rotations around the vertical axis (height stays vertical). */
   keepUpright: boolean
   order: Ordering
+  /**
+   * What the container may carry, in the same unit as BoxType.weight. A box
+   * that would take the load past it is left for another container. 0 (the
+   * default) means no limit.
+   */
+  maxWeight?: number
   /**
    * Skip the quick impossibility checks and always attempt placement. The
    * optimizer uses this to get a feasible partial packing even when the full
