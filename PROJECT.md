@@ -24,6 +24,8 @@ Added on 2026-09-03: container presets and a cabinet catalog with a searchable p
 
 Added on 2026-09-08: the import asks which unit the file's sizes are in and switching units converts every size (sections 2 and 5.7); a custom box can be saved into the catalog and taken back out (section 5.5); the shipped catalog is five placeholders instead of the 174 sample rows, since the real one is loaded from a spreadsheet or built up in the app. Then the 3D view was made to scale to a thousand boxes in a container (section 5.8).
 
+Added on 2026-09-10: fragility per box type in place of the global "keep upright" toggle (section 4.5), and a sidebar without Load example, Order template or the standing hint line.
+
 Added on 2026-09-09: two loading modes, Even (the default, spreading the boxes so every container holds close to the same number) and Optimize (the previous behaviour), in sections 4.4 and 5.6; editable per-container counts in the legend (section 5.6); and weight, with a payload per container type and a weight per box (section 5.9).
 
 ## 1. Goals and non-goals
@@ -49,7 +51,7 @@ Non-goals (v1) - deliberately out of scope to keep it small:
 
 - Container: axis-aligned cuboid with interior dims L (x), W (y), H (z). Origin at the back-bottom-left corner.
 - Box type: name, dims l x w x h, quantity, color. "Cubish" means rectangular cuboid, not necessarily a cube.
-- Orientation: one of the 6 axis-aligned rotations of a box (fewer when sides are equal). With "keep upright" on, only the 2 rotations around the vertical axis are allowed.
+- Orientation: one of the 6 axis-aligned rotations of a box (fewer when sides are equal). A fragile box keeps only the 2 rotations around the vertical axis.
 - Placement: a box instance at position (x, y, z) with oriented dims (dx, dy, dz). Boxes may touch but never overlap.
 - Status:
   - `fits`: every requested box was placed. This is a constructive proof.
@@ -64,7 +66,7 @@ Defaults (change if you disagree, but change them in one place):
 
 | Setting            | Default                                                                 |
 | ------------------ | ----------------------------------------------------------------------- |
-| Rotations          | all 6 orientations allowed; "Keep upright" toggle restricts to 2        |
+| Rotations          | all 6 orientations allowed; a fragile box is limited to 2               |
 | Packing order      | volume descending                                                       |
 | Candidate order    | z, then y, then x (fill layers bottom-up, back to front, left to right) |
 | Placement rule     | first fit (best fit is a small later change, see 4.2)                   |
@@ -291,6 +293,20 @@ Two modes decide how the load is spread, both deterministic.
 In `optimize` mode the UI runs the plain variant synchronously in `derive()` (a few milliseconds) for instant feedback and the budgeted variant in a worker; `shownResult()` shows the worker's packing once it is in, unless it needs more containers or places fewer boxes, which greedy per-container filling can in principle do.
 
 Measured on the example order (140 cabinets, 20 ft): plain filling gives 62 and 78 boxes at 87 % and 57 % fill in 3 ms, even gives 70 and 70 at 72 % each in 6 ms, and optimizing confirms the plain split in 35 ms. On 1,300 small boxes over three containers: plain 393 / 898 / 9, even 434 / 433 / 433.
+
+### 4.5 Fragile boxes
+
+A box type marked `fragile` carries three rules through the packer at once:
+
+- **Upright.** Only the two rotations around the vertical axis, so its height stays its height.
+- **Against a wall.** The placement must touch one of the container's four vertical walls (`againstWall`), which keeps it out of the middle of the load.
+- **Nothing above.** No box may occupy the space over its footprint, at any height (`above`), not merely rest on it.
+
+Fragile items are ordered last whatever the packing order (`fragileLast` in `ordering.ts`), so they land on top of what is already there rather than blocking the space above them.
+
+Candidate positions are the corners of placed boxes, which means a box can only ever reach the walls a placement happens to end on. For a box that must touch one, that throws away most of the container, so every candidate is also tried slid across to the far walls (`slidToWalls`). On a 20 ft container that took the number of upright 36 x 24 in cabinets that fit around the walls from 8 to 14, which is the perimeter capacity by hand.
+
+Wall space is finite, so a lot of fragile boxes needs more containers: 28 fragile cabinets in the example order take 4 containers instead of 2. That is the cost of the rules, not a packing failure.
 
 ## 5. UI
 

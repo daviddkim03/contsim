@@ -13,7 +13,6 @@ import { boxType, overfull, oversize, packingViolation, rotation, tiny } from '.
 
 const run = (s: Scenario, optimizeRuns = 0, maxContainers?: number) =>
   packMany(s.container, s.types, {
-    keepUpright: s.keepUpright,
     optimizeRuns,
     maxContainers,
     // Bound by runs alone, so a slow machine cannot change the answer.
@@ -85,9 +84,12 @@ describe('packMany', () => {
     expect(multiViolation(s, r)).toBeNull()
   })
 
-  it('respects keepUpright when deciding what can ship at all', () => {
+  it('will not lay a fragile box down to make it fit', () => {
     expect(run(rotation).status).toBe('fits')
-    const upright = { ...rotation, keepUpright: true }
+    const upright: Scenario = {
+      ...rotation,
+      types: [{ ...rotation.types[0]!, fragile: true }],
+    }
     const r = run(upright)
     expect(r.status).toBe('impossible')
     expect(r.containers).toHaveLength(0)
@@ -97,7 +99,6 @@ describe('packMany', () => {
   it('stops at the container cap and reports the rest unplaced', () => {
     const s: Scenario = {
       container: { l: 10, w: 10, h: 10 },
-      keepUpright: false,
       types: [boxType('big', 10, 10, 10, 3)],
     }
     const r = run(s, 0, 2)
@@ -155,7 +156,6 @@ describe('packMany', () => {
     const s = exampleScenario()
     // Nothing fits in no time, so every container falls back to first fit.
     const rushed = packMany(s.container, s.types, {
-      keepUpright: false,
       optimizeRuns: 400,
       budgetMs: 0,
     })
@@ -169,7 +169,6 @@ describe('packMany', () => {
     const s = exampleScenario()
     const seen: MultiPackProgress[] = []
     const r = packMany(s.container, s.types, {
-      keepUpright: false,
       optimizeRuns: 400,
       onProgress: (p) => {
         seen.push(p)
@@ -188,7 +187,7 @@ describe('packMany', () => {
   it('spreads the boxes evenly when asked, over the same containers', () => {
     const s = exampleScenario()
     const filled = run(s)
-    const even = packMany(s.container, s.types, { keepUpright: false, mode: 'even' })
+    const even = packMany(s.container, s.types, { mode: 'even' })
     const counts = (r: MultiPackResult) => r.containers.map((c) => c.placements.length)
     // Filling one container at a time leaves the last one nearly empty; evening does not.
     expect(counts(filled)).toEqual([123, 15])
@@ -200,7 +199,7 @@ describe('packMany', () => {
 
   it('gives every container the same mix of types, not just the same count', () => {
     const s = exampleScenario()
-    const even = packMany(s.container, s.types, { keepUpright: false, mode: 'even' })
+    const even = packMany(s.container, s.types, { mode: 'even' })
     for (const t of s.types) {
       const perContainer = even.containers.map(
         (c) => c.placements.filter((p) => p.typeId === t.id).length,
@@ -213,7 +212,6 @@ describe('packMany', () => {
 
   it('leaves a single container alone, and never opens an extra one to even out', () => {
     const single = packMany(mixedScenario().container, mixedScenario().types, {
-      keepUpright: false,
       mode: 'even',
     })
     expect(single.containers).toHaveLength(1)
@@ -226,9 +224,9 @@ describe('packMany', () => {
       const types = Array.from({ length: int(1, 4) }, (_, k) =>
         boxType(`t${k}`, int(1, 20), int(1, 20), int(1, 20), int(1, 12)),
       )
-      const scenario: Scenario = { container, types, keepUpright: random() < 0.3 }
+      const scenario: Scenario = { container, types }
       const filled = run(scenario)
-      const even = packMany(container, types, { keepUpright: scenario.keepUpright, mode: 'even' })
+      const even = packMany(container, types, { mode: 'even' })
       expect(multiViolation(scenario, even)).toBeNull()
       expect(even.containers.length).toBeLessThanOrEqual(filled.containers.length)
       expect(even.stats.placed).toBe(filled.stats.placed)
@@ -238,12 +236,10 @@ describe('packMany', () => {
   it('evens out without the optimizer, and is deterministic', () => {
     const s = exampleScenario()
     const a = packMany(s.container, s.types, {
-      keepUpright: false,
       mode: 'even',
       optimizeRuns: 400,
     })
     const b = packMany(s.container, s.types, {
-      keepUpright: false,
       mode: 'even',
       optimizeRuns: 400,
     })
@@ -254,14 +250,13 @@ describe('packMany', () => {
 
   it('puts a pinned number of boxes in a container and moves the rest along', () => {
     const s = exampleScenario()
-    const even = packMany(s.container, s.types, { keepUpright: false, mode: 'even' })
+    const even = packMany(s.container, s.types, { mode: 'even' })
     const perType = (r: MultiPackResult, i: number, id: string) =>
       r.containers[i]!.placements.filter((p) => p.typeId === id).length
     expect(perType(even, 0, 'small')).toBe(30)
 
     // Half as many small cartons in the first container; the rest go to the second.
     const pinned = packMany(s.container, s.types, {
-      keepUpright: false,
       mode: 'even',
       allocation: [{ small: 15 }],
     })
@@ -274,7 +269,6 @@ describe('packMany', () => {
   it('never puts more in a container than is left, or than fits', () => {
     const s = exampleScenario()
     const greedy = packMany(s.container, s.types, {
-      keepUpright: false,
       // Far more than the order holds, and more than one container can take.
       allocation: [{ small: 9999, pallet: 9999 }],
     })
@@ -288,7 +282,6 @@ describe('packMany', () => {
   it('pins the later containers too, and leaves the others to the mode', () => {
     const s = exampleScenario()
     const r = packMany(s.container, s.types, {
-      keepUpright: false,
       mode: 'even',
       allocation: [undefined, { crate: 0 }],
     })
@@ -303,13 +296,12 @@ describe('packMany', () => {
     // Twelve boxes fit the space easily; the payload only carries five at a time.
     const s: Scenario = {
       container: { l: 10, w: 10, h: 10 },
-      keepUpright: false,
       types: [{ ...boxType('drum', 2, 2, 2, 12), weight: 200 }],
     }
-    const light = packMany(s.container, s.types, { keepUpright: false })
+    const light = packMany(s.container, s.types, {})
     expect(light.containers).toHaveLength(1)
 
-    const heavy = packMany(s.container, s.types, { keepUpright: false, maxWeight: 1000 })
+    const heavy = packMany(s.container, s.types, { maxWeight: 1000 })
     expect(heavy.status).toBe('fits')
     expect(heavy.containers.map((c) => c.placements.length)).toEqual([5, 5, 2])
     expect(heavy.containers.map((c) => c.stats.weight)).toEqual([1000, 1000, 400])
@@ -320,11 +312,9 @@ describe('packMany', () => {
   it('evens out by count, keeping every container inside the payload', () => {
     const s: Scenario = {
       container: { l: 10, w: 10, h: 10 },
-      keepUpright: false,
       types: [{ ...boxType('drum', 2, 2, 2, 12), weight: 200 }],
     }
     const even = packMany(s.container, s.types, {
-      keepUpright: false,
       mode: 'even',
       maxWeight: 1000,
     })
@@ -336,13 +326,12 @@ describe('packMany', () => {
   it('reports a box no container may carry, and ships the rest', () => {
     const s: Scenario = {
       container: { l: 10, w: 10, h: 10 },
-      keepUpright: false,
       types: [
         { ...boxType('anvil', 2, 2, 2, 3), weight: 5000 },
         { ...boxType('crate', 2, 2, 2, 4), weight: 100 },
       ],
     }
-    const r = packMany(s.container, s.types, { keepUpright: false, maxWeight: 1000 })
+    const r = packMany(s.container, s.types, { maxWeight: 1000 })
     expect(r.status).toBe('impossible')
     expect(r.impossibility).toEqual({
       kind: 'overweight',
@@ -363,7 +352,7 @@ describe('packMany', () => {
       const types = Array.from({ length: int(1, 4) }, (_, k) =>
         boxType(`t${k}`, int(1, 20), int(1, 20), int(1, 20), int(1, 12)),
       )
-      const s: Scenario = { container, types, keepUpright: random() < 0.3 }
+      const s: Scenario = { container, types }
       const r = run(s, i % 3 === 0 ? 60 : 0)
       expect(multiViolation(s, r)).toBeNull()
       if (r.status === 'fits') expect(r.unplaced).toEqual({})

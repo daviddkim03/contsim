@@ -48,6 +48,8 @@ export interface BoxTypeDraft {
   h: string
   /** Weight of one box in the draft's weight unit; blank means unknown. */
   weight: string
+  /** Upright, against a wall, nothing on top. */
+  fragile: boolean
   qty: string
   color: string
 }
@@ -79,7 +81,6 @@ export interface ScenarioImport {
     container: { l: string; w: string; h: string } | null
     /** What a custom container may carry, in `weightUnit`; blank for no limit. */
     maxWeight: string
-    keepUpright: boolean
     mode: LoadMode
   } | null
 }
@@ -96,7 +97,6 @@ export interface Draft {
   /** What a custom container may carry, in `weightUnit`; blank means no limit. */
   maxWeight: string
   types: BoxTypeDraft[]
-  keepUpright: boolean
   unit: Unit
   weightUnit: WeightUnit
 }
@@ -113,10 +113,9 @@ export function scenarioShape(draft: Draft): string {
     c.h,
     draft.unit,
     draft.mode,
-    draft.keepUpright,
     payloadText(draft),
     draft.weightUnit,
-    draft.types.map((t) => [t.id, t.kind, t.catalogCode, t.l, t.w, t.h, t.weight]),
+    draft.types.map((t) => [t.id, t.kind, t.catalogCode, t.l, t.w, t.h, t.weight, t.fragile]),
   ])
 }
 
@@ -237,7 +236,6 @@ export function draftFromScenario(scenario: Scenario, unit: Unit): Draft {
     },
     maxWeight: '',
     weightUnit: 'kg',
-    keepUpright: scenario.keepUpright,
     unit,
     types: scenario.types.map((t) => ({
       id: t.id,
@@ -248,6 +246,7 @@ export function draftFromScenario(scenario: Scenario, unit: Unit): Draft {
       w: s(t.dims.w),
       h: s(t.dims.h),
       weight: t.weight ? s(t.weight / 1000) : '',
+      fragile: t.fragile === true,
       qty: s(t.qty),
       color: t.color,
     })),
@@ -324,6 +323,7 @@ export function derive(draft: Draft): Derived {
         color: t.color,
         dims: NO_DIMS,
         weight: 0,
+        fragile: t.fragile,
         qty,
       }
     }
@@ -337,6 +337,7 @@ export function derive(draft: Draft): Derived {
         h: length(`types[${i}].dims.h`, texts.h),
       },
       weight: grams(`types[${i}].weight`, t.weight),
+      fragile: t.fragile,
       qty,
     }
   })
@@ -351,11 +352,10 @@ export function derive(draft: Draft): Derived {
     return { scale, issues, scenario: null, result: null, stale: false }
   }
 
-  const scenario: Scenario = { container, types, keepUpright: draft.keepUpright }
+  const scenario: Scenario = { container, types }
   // In 'even' mode this is the finished answer; in 'optimize' mode it is first
   // fit, which the worker then improves on (src/ui/optimizeClient.ts).
   const result = packMany(container, types, {
-    keepUpright: draft.keepUpright,
     mode: draft.mode,
     maxWeight,
     allocation: allocationOf(draft),
@@ -457,9 +457,6 @@ export const edits = {
       }),
     }
   },
-  setKeepUpright(draft: Draft, keepUpright: boolean): Draft {
-    return { ...draft, keepUpright }
-  },
   /** A new row starts as a catalog search with nothing picked yet. */
   addType(draft: Draft): Draft {
     const type: BoxTypeDraft = {
@@ -471,6 +468,7 @@ export const edits = {
       w: '',
       h: '',
       weight: '',
+      fragile: false,
       qty: '1',
       color: nextColor(draft.types.map((t) => t.color)),
     }
@@ -525,6 +523,9 @@ export const edits = {
   clearTypes(draft: Draft): Draft {
     return draft.types.length === 0 ? draft : { ...draft, types: [], allocation: null }
   },
+  setFragile(draft: Draft, id: string, fragile: boolean): Draft {
+    return { ...draft, types: draft.types.map((t) => (t.id === id ? { ...t, fragile } : t)) }
+  },
   setTypeField(draft: Draft, id: string, field: TypeField, value: string): Draft {
     return {
       ...draft,
@@ -556,7 +557,6 @@ export const edits = {
             containerType: c.containerType,
             container: c.container ?? converted.container,
             maxWeight: c.maxWeight || converted.maxWeight,
-            keepUpright: c.keepUpright,
             mode: c.mode,
           }
         : {}),
@@ -634,6 +634,8 @@ export function parseDraft(json: string): Draft | null {
       if (!isString(r.l) || !isString(r.w) || !isString(r.h) || !isString(r.qty)) return null
       const weight = r.weight === undefined ? '' : r.weight
       if (!isString(weight)) return null
+      // Rows saved before fragile existed are ordinary boxes.
+      if (r.fragile !== undefined && typeof r.fragile !== 'boolean') return null
       // Rows saved before the catalog existed are custom boxes.
       const kind = r.kind === undefined ? 'custom' : r.kind
       if (!BOX_KINDS.includes(kind as BoxKind)) return null
@@ -648,6 +650,7 @@ export function parseDraft(json: string): Draft | null {
         w: r.w,
         h: r.h,
         weight,
+        fragile: r.fragile === true,
         qty: r.qty,
         color: r.color,
       })
@@ -659,7 +662,6 @@ export function parseDraft(json: string): Draft | null {
       container: { l: c.l, w: c.w, h: c.h },
       maxWeight,
       types,
-      keepUpright: d.keepUpright === true,
       unit: d.unit as Unit,
       weightUnit: weightUnit as WeightUnit,
     }

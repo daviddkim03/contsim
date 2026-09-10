@@ -1,12 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  ORDER_FORMAT_GUIDE,
-  importOrder,
-  importWorkbook,
-  orderTemplate,
-  parseHeader,
-  readSummary,
-} from '../../src/ui/orderImport'
+import { importOrder, importWorkbook, parseHeader, readSummary } from '../../src/ui/orderImport'
 import { buildReport } from '../../src/ui/report'
 import { parseCsv, readWorkbook } from '../../src/ui/spreadsheet'
 import {
@@ -179,7 +172,7 @@ describe('importOrder', () => {
 describe('importWorkbook', () => {
   it('round-trips the Excel export: boxes, container, unit and upright', async () => {
     let draft = edits.setContainerType(exampleDraft(), '40ft-hc')
-    draft = edits.setKeepUpright(draft, true)
+    draft = edits.setFragile(draft, draft.types[0]!.id, true)
     draft = edits.setUnit(draft, 'cm')
     const bytes = await writeXlsx(buildReport(stateOf(draft))!)
     const r = importWorkbook(await readWorkbook(bytes), 'in', 'kg', [])
@@ -189,7 +182,6 @@ describe('importWorkbook', () => {
       containerType: '40ft-hc',
       container: null,
       maxWeight: '19000',
-      keepUpright: true,
       mode: 'even',
     })
     expect(r.imported.unit).toBe('cm')
@@ -220,7 +212,6 @@ describe('importWorkbook', () => {
       containerType: 'custom',
       container: { l: '232.2', w: '92.6', h: '94.2' },
       maxWeight: '',
-      keepUpright: false,
       mode: 'even',
     })
     expect(r.imported.unit).toBe('in')
@@ -232,16 +223,6 @@ describe('importWorkbook', () => {
       h: '20',
       qty: '3',
     })
-  })
-
-  it('treats a workbook without Boxes and Summary sheets as an order in its first sheet', async () => {
-    const bytes = await writeXlsx(orderTemplate('in'))
-    const r = importWorkbook(await readWorkbook(bytes), 'in', 'kg', [])
-    expect(r.ok && r.imported.types.map((t) => [t.kind, t.name, t.qty, t.l])).toEqual([
-      ['catalog', '3036', '4', '30'],
-      ['catalog', '2442', '2', '24'],
-      ['custom', 'Crate', '1', '40'],
-    ])
   })
 })
 
@@ -263,7 +244,6 @@ describe('readSummary', () => {
         containerType: '40ft-hc',
         container: null,
         maxWeight: '',
-        keepUpright: true,
         mode: 'optimize',
       },
       unit: 'mm',
@@ -286,7 +266,6 @@ describe('readSummary', () => {
         containerType: 'custom',
         container: { l: '100', w: '50', h: '40.5' },
         maxWeight: '',
-        keepUpright: false,
         // A workbook from before the modes existed loads as Even, the default.
         mode: 'even',
       },
@@ -295,18 +274,5 @@ describe('readSummary', () => {
     })
     expect(readSummary([['Container type', 'custom']], 'in', 'kg')).toBeNull()
     expect(readSummary([['Item', 'Value']], 'in', 'kg')).toBeNull()
-  })
-})
-
-describe('orderTemplate', () => {
-  it('lists the guide and example sizes in the chosen unit', () => {
-    const wb = orderTemplate('mm')
-    expect(wb.sheets.map((s) => s.name)).toEqual(['Order', 'Guide'])
-    expect(wb.sheets[0]!.header[2]).toBe('Width (mm)')
-    expect(wb.sheets[0]!.header[5]).toBe('Weight (kg)')
-    expect(orderTemplate('in', 'lb').sheets[0]!.header[5]).toBe('Weight (lb)')
-    expect(wb.sheets[0]!.rows[1]![0]).toBe('2442')
-    expect(wb.sheets[0]!.rows[2]!.slice(2, 5)).toEqual([1016, 762, 508])
-    expect(wb.sheets[1]!.rows).toHaveLength(ORDER_FORMAT_GUIDE.length)
   })
 })

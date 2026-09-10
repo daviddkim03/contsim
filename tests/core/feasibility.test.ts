@@ -13,8 +13,7 @@ const type = (id: string, l: number, w: number, h: number, qty: number): BoxType
   qty,
   color: '#000000',
 })
-const free = { keepUpright: false }
-const upright = { keepUpright: true }
+const free = {}
 const cube10: Container = { l: 10, w: 10, h: 10 }
 const cube4: Container = { l: 4, w: 4, h: 4 }
 const tall: Container = { l: 1, w: 1, h: 10 }
@@ -46,11 +45,10 @@ describe('findImpossibility', () => {
       expect(findImpossibility(tall, [type('a', 10, 1, 1, 1)], free)).toBeNull()
     })
 
-    it('respects keepUpright', () => {
-      expect(findImpossibility(tall, [type('a', 10, 1, 1, 1)], upright)).toEqual({
-        kind: 'oversize',
-        typeId: 'a',
-      })
+    it('fires for a fragile box, which may not be laid on its side', () => {
+      expect(findImpossibility(tall, [{ ...type('a', 10, 1, 1, 1), fragile: true }], free)).toEqual(
+        { kind: 'oversize', typeId: 'a' },
+      )
     })
   })
 
@@ -98,10 +96,12 @@ describe('findImpossibility', () => {
       expect(findImpossibility(cube10, [type('a', 6, 6, 1, 20)], free)).toBeNull()
     })
 
-    it('uses the height as the vertical spacing with keepUpright', () => {
-      // Upright 6 x 6 x 1 slabs can only be stacked: floor(10/6) * floor(10/6) * floor(10/1) = 10.
-      expect(findImpossibility(cube10, [type('a', 6, 6, 1, 10)], upright)).toBeNull()
-      expect(findImpossibility(cube10, [type('a', 6, 6, 1, 11)], upright)).toEqual({
+    it('uses the height as the vertical spacing for a fragile box', () => {
+      // Fragile 6 x 6 x 1 slabs stay upright, so they can only be stacked:
+      // floor(10/6) * floor(10/6) * floor(10/1) = 10.
+      const slab = (qty: number) => [{ ...type('a', 6, 6, 1, qty), fragile: true }]
+      expect(findImpossibility(cube10, slab(10), free)).toBeNull()
+      expect(findImpossibility(cube10, slab(11), free)).toEqual({
         kind: 'upper-bound',
         typeId: 'a',
         qty: 11,
@@ -165,14 +165,15 @@ describe('describeImpossibility', () => {
     const types = [
       { id: 'slab', name: 'Slab', dims: { l: 1, w: 1, h: 1 }, qty: 2, color: '#888', weight: 2000 },
     ]
-    expect(findImpossibility({ l: 10, w: 10, h: 10 }, types, { keepUpright: false })).toBeNull()
-    expect(
-      findImpossibility({ l: 10, w: 10, h: 10 }, types, { keepUpright: false, maxWeight: 1500 }),
-    ).toEqual({ kind: 'overweight', typeId: 'slab', weight: 2000, maxWeight: 1500 })
+    expect(findImpossibility({ l: 10, w: 10, h: 10 }, types, {})).toBeNull()
+    expect(findImpossibility({ l: 10, w: 10, h: 10 }, types, { maxWeight: 1500 })).toEqual({
+      kind: 'overweight',
+      typeId: 'slab',
+      weight: 2000,
+      maxWeight: 1500,
+    })
     // A load of several boxes over the limit is not impossible: they ship apart.
-    expect(
-      findImpossibility({ l: 10, w: 10, h: 10 }, types, { keepUpright: false, maxWeight: 2500 }),
-    ).toBeNull()
+    expect(findImpossibility({ l: 10, w: 10, h: 10 }, types, { maxWeight: 2500 })).toBeNull()
   })
 
   it('formats lengths, volumes and weights with the given formatters', () => {

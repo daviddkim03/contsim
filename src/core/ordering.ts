@@ -7,6 +7,8 @@ export interface Item {
   typeIndex: number
   dims: Dims
   volume: number
+  /** Upright, against a wall, nothing on top; see BoxType.fragile. */
+  fragile: boolean
 }
 
 /** One item per physical box, in box-type order. */
@@ -14,7 +16,10 @@ export function expandTypes(types: BoxType[]): Item[] {
   const items: Item[] = []
   types.forEach((t, typeIndex) => {
     const v = volume(t.dims)
-    for (let i = 0; i < t.qty; i++) items.push({ typeId: t.id, typeIndex, dims: t.dims, volume: v })
+    const fragile = t.fragile === true
+    for (let i = 0; i < t.qty; i++) {
+      items.push({ typeId: t.id, typeIndex, dims: t.dims, volume: v, fragile })
+    }
   })
   return items
 }
@@ -58,6 +63,17 @@ const byType: Key = [(it) => it.typeIndex, 'asc']
  * so ties keep box-type order and, within a type, insertion order.
  */
 export function orderItems(items: Item[], order: Ordering): Item[] {
+  // Fragile boxes go last whatever the ordering, so they land on top of the
+  // load rather than blocking the space above them.
+  return fragileLast(orderWithin(items, order))
+}
+
+/** Stable, so each half keeps the order it was given. */
+function fragileLast(items: Item[]): Item[] {
+  return [...items.filter((it) => !it.fragile), ...items.filter((it) => it.fragile)]
+}
+
+function orderWithin(items: Item[], order: Ordering): Item[] {
   if (typeof order === 'object') return jitteredByVolume(items, order.shuffle)
   switch (order) {
     case 'volume-desc':

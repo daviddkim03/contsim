@@ -16,23 +16,8 @@ import { CONTAINER_PRESETS } from './presets'
 import type { CellValue, Row, SheetRows } from './spreadsheet'
 import { newTypeId, type BoxTypeDraft, type ScenarioImport } from './state'
 import { UNITS, convertLength, convertWeight, type Unit, type WeightUnit } from './units'
-import type { Workbook } from './xlsx'
 
-export const ORDER_TEMPLATE_FILENAME = 'contsim-order-template.xlsx'
-
-/** The format, one rule per line. Shown in the template's Guide sheet and in the README. */
-export const ORDER_FORMAT_GUIDE: readonly string[] = [
-  'One row per cabinet or box; the first row holds the column headers. Extra columns are ignored and blank rows are skipped.',
-  'Code (also accepted: Type, Item, SKU, Name, Box): a code from the catalog, for example 3036. Any other text makes a custom box named after it, which you can save into the catalog from its row.',
-  'Qty (also accepted: Quantity, Count, Pcs, Requested): a whole number.',
-  "Width, Depth, Height (also accepted: W, D, H): only needed for boxes that are not in the catalog; ignored for catalog codes. Width runs along the container's length.",
-  'Weight (also accepted: Wt, Mass): the weight of one box, so the load stays inside what a container may carry. Leave it out and the boxes count as weightless.',
-  'Units: put the unit in the header, for example "Width (mm)" or "Weight (lb)". Without one, contsim asks which unit the file uses.',
-  'Rows with the same code are added together.',
-  'Files: .xlsx (the first sheet is read) or .csv (comma, semicolon or tab separated). A workbook saved with Export Excel is recognized too: its Boxes sheet restores the order and its Summary sheet the container, unit and upright setting.',
-]
-
-type Column = 'code' | 'qty' | 'first' | 'second' | 'third' | 'weight' | 'color'
+type Column = 'code' | 'qty' | 'first' | 'second' | 'third' | 'weight' | 'fragile' | 'color'
 
 /** Header words per column. "length" and "width" both mean the first size unless both appear (see importOrder). */
 const HEADERS: Record<Column, readonly string[]> = {
@@ -55,6 +40,7 @@ const HEADERS: Record<Column, readonly string[]> = {
   second: ['d', 'depth'],
   third: ['h', 'height'],
   weight: ['weight', 'wt', 'mass', 'weighteach', 'weightper', 'weightperbox', 'unitweight'],
+  fragile: ['fragile', 'delicate'],
   color: ['color', 'colour'],
 }
 
@@ -266,6 +252,9 @@ export function importOrder(
       weighs === null || weighs <= 0
         ? ''
         : String(convertWeight(weighs, weightColumn?.weightUnit ?? weightUnit, weightUnit))
+    // Anything but a plain no counts as fragile: "yes", "y", "true", "x", "1".
+    const fragileText = columns.fragile ? cellText(row[columns.fragile.index]).toLowerCase() : ''
+    const fragile = fragileText !== '' && !['no', 'n', 'false', '0', '-'].includes(fragileText)
 
     const item: CatalogItem | null = findCatalogItem(code)
     if (item) {
@@ -277,6 +266,7 @@ export function importOrder(
           name: item.code,
           ...catalogTexts(item, unit),
           weight: weightText,
+          fragile,
         },
         qty,
         color,
@@ -294,7 +284,7 @@ export function importOrder(
       const [l, w, h] = size.map(String) as [string, string, string]
       add(
         `custom:${code}|${l}|${w}|${h}`,
-        { kind: 'custom', catalogCode: '', name: code, l, w, h, weight: weightText },
+        { kind: 'custom', catalogCode: '', name: code, l, w, h, weight: weightText, fragile },
         qty,
         color,
         `"${code}"`,
@@ -354,13 +344,12 @@ export function readSummary(
   const typeName = cellText(values.get('container type')).toLowerCase()
   if (!typeName) return null
   const preset = CONTAINER_PRESETS.find((p) => p.name.toLowerCase() === typeName)
-  const keepUpright = cellText(values.get('keep boxes upright')).toLowerCase() === 'yes'
   // Written since 2026-09-09; an older workbook gets the app's default.
   const mode: LoadMode =
     cellText(values.get('loading mode')).toLowerCase() === 'optimize' ? 'optimize' : 'even'
   if (preset) {
     return {
-      container: { containerType: preset.id, container: null, maxWeight, keepUpright, mode },
+      container: { containerType: preset.id, container: null, maxWeight, mode },
       unit,
       weightUnit,
     }
@@ -377,7 +366,6 @@ export function readSummary(
       containerType: 'custom',
       container: { l: dims[0], w: dims[1], h: dims[2] },
       maxWeight,
-      keepUpright,
       mode,
     },
     unit,
@@ -410,37 +398,4 @@ export function importWorkbook(
     return { ok: true, imported: { ...parsed.imported, container: read?.container ?? null } }
   }
   return importOrder(sheets[0]!.rows, unit, weightUnit, existing)
-}
-
-/** The template workbook: an Order sheet with examples and a Guide sheet with the rules. */
-export function orderTemplate(unit: Unit, weightUnit: WeightUnit = 'kg'): Workbook {
-  const size = (inches: number) => convertLength(inches, 'in', unit)
-  return {
-    sheets: [
-      {
-        name: 'Order',
-        header: [
-          'Code',
-          'Qty',
-          `Width (${unit})`,
-          `Depth (${unit})`,
-          `Height (${unit})`,
-          `Weight (${weightUnit})`,
-          'Note',
-        ],
-        rows: [
-          ['3036', 4, null, null, null, 34, 'A catalog code: the size comes from the catalog'],
-          ['2442', 2, null, null, null, null, 'Leave the weight out if you do not track it'],
-          ['Crate', 1, size(40), size(30), size(20), 120, 'Not in the catalog: give the size'],
-        ],
-        widths: [14, 8, 12, 12, 12, 13, 50],
-      },
-      {
-        name: 'Guide',
-        header: ['#', 'How to fill in the Order sheet'],
-        rows: ORDER_FORMAT_GUIDE.map((line, i) => [i + 1, line]),
-        widths: [4, 120],
-      },
-    ],
-  }
 }

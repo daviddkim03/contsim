@@ -1,4 +1,23 @@
-import type { Box, Dims, Point, Size } from './types'
+import type { Box, Container, Dims, Point, Size } from './types'
+
+/** True when the box touches one of the container's four vertical walls. */
+export function againstWall(p: Point, s: Size, c: Container): boolean {
+  return p.x === 0 || p.y === 0 || p.x + s.dx === c.l || p.y + s.dy === c.w
+}
+
+/**
+ * True when a box at `p` would sit in the space above `under`: at or over its
+ * top, with their footprints overlapping. Nothing may be above a fragile box.
+ */
+export function above(p: Point, s: Size, under: Box): boolean {
+  return (
+    p.z >= under.z + under.dz &&
+    p.x < under.x + under.dx &&
+    under.x < p.x + s.dx &&
+    p.y < under.y + under.dy &&
+    under.y < p.y + s.dy
+  )
+}
 
 /** Weight of one box of this type; unknown weights count as nothing. */
 export function boxWeight(t: { weight?: number }): number {

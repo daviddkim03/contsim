@@ -21,7 +21,6 @@ const boxType = (
 export function mixedScenario(): Scenario {
   return {
     container: CONTAINERS['20ft'],
-    keepUpright: false,
     types: [
       boxType('pallet', 'Pallet box', 48, 40, 48, 6, '#f59e0b'),
       boxType('crate', 'Long crate', 72, 20, 20, 3, '#3b82f6'),

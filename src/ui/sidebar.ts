@@ -10,13 +10,7 @@ import { attachCombobox } from './combobox'
 import { download, h, query, setInvalid, setValue, setText } from './dom'
 import { promptImport } from './importDialog'
 import { wireHover } from './legend'
-import {
-  importOrder,
-  importWorkbook,
-  ORDER_TEMPLATE_FILENAME,
-  orderTemplate,
-  type ImportParse,
-} from './orderImport'
+import { importOrder, importWorkbook, type ImportParse } from './orderImport'
 import { CONTAINER_PRESETS, presetFor, type ContainerType } from './presets'
 import { buildReport, EXCEL_FILENAME } from './report'
 import { parseCsv, readWorkbook } from './spreadsheet'
@@ -24,7 +18,6 @@ import {
   containerTexts,
   edits,
   payloadText,
-  exampleDraft,
   type AppState,
   type BoxTypeDraft,
   type ContainerKey,
@@ -117,20 +110,11 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
         ${LOAD_MODE_LABELS.map(([value, label]) => `<button type="button" data-load-mode="${value}">${label}</button>`).join('')}
       </div>
       <p class="hint" data-role="mode-hint"></p>
-      <label class="check">
-        <input type="checkbox" data-field="keepUpright">
-        <span>Keep boxes upright</span>
-      </label>
-      <p class="hint">Only rotate around the vertical axis</p>
     </section>
 
     <footer class="sidebar-actions">
       <button type="button" class="primary" data-action="export-excel">Export Excel</button>
-      <div class="file-row">
-        <button type="button" class="ghost" data-action="example">Load example</button>
-        <button type="button" class="ghost" data-action="template">Order template</button>
-      </div>
-      <p class="hint" data-role="footer-hint">Results update as you type</p>
+      <p class="hint" data-role="footer-hint" hidden></p>
       <input type="file" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" data-field="import-file" hidden>
     </footer>
   `
@@ -144,7 +128,6 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
   const payloadUnit = query<HTMLElement>(root, '[data-role="payload-unit"]')
   const containerTypeSelect = query<HTMLSelectElement>(root, '[data-field="containerType"]')
   const containerHint = query<HTMLElement>(root, '[data-role="container-hint"]')
-  const uprightCheckbox = query<HTMLInputElement>(root, '[data-field="keepUpright"]')
   const modeButtons = root.querySelectorAll<HTMLButtonElement>('[data-load-mode]')
   const modeHint = query<HTMLElement>(root, '[data-role="mode-hint"]')
   const list = query<HTMLUListElement>(root, '.box-list')
@@ -184,15 +167,16 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
 
   root.addEventListener('change', (event) => {
     const target = event.target
+    if (target instanceof HTMLInputElement && target.dataset.field === 'fragile') {
+      const id = target.closest<HTMLElement>('li[data-id]')?.dataset.id
+      if (id) store.edit((d) => edits.setFragile(d, id, target.checked))
+    }
     if (target === unitSelect) store.edit((d) => edits.setUnit(d, unitSelect.value as Unit))
     if (target === weightUnitSelect) {
       store.edit((d) => edits.setWeightUnit(d, weightUnitSelect.value as WeightUnit))
     }
     if (target === containerTypeSelect) {
       store.edit((d) => edits.setContainerType(d, containerTypeSelect.value as ContainerType))
-    }
-    if (target === uprightCheckbox) {
-      store.edit((d) => edits.setKeepUpright(d, uprightCheckbox.checked))
     }
     if (target === importInput) void importFile(importInput.files?.[0])
   })
@@ -233,20 +217,8 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
       case 'dec':
         if (id) store.edit((d) => edits.stepQty(d, id, -1))
         break
-      case 'example': {
-        const current = JSON.stringify(store.get().draft)
-        const example = exampleDraft()
-        if (current === JSON.stringify(example)) return
-        if (window.confirm('Replace the current scenario with the example?')) {
-          store.edit(() => example)
-        }
-        break
-      }
       case 'export-excel':
         void exportExcel()
-        break
-      case 'template':
-        void downloadTemplate()
         break
       case 'import':
         importInput.value = ''
@@ -291,12 +263,6 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
     }
     store.edit((d) => edits.setCatalogItem(d, id, result.item.code))
     showNotice(`${result.item.code} saved to the catalog.`, false)
-  }
-
-  async function downloadTemplate(): Promise<void> {
-    const { unit, weightUnit } = store.get().draft
-    const workbook = orderTemplate(unit, weightUnit)
-    download(new Blob([await writeXlsx(workbook)], { type: XLSX_MIME }), ORDER_TEMPLATE_FILENAME)
   }
 
   function showNotice(text: string, error: boolean): void {
@@ -395,6 +361,10 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
         </div>
       </div>
       <div class="row-bottom">
+        <label class="check row-fragile" title="Upright, against a wall, nothing on top">
+          <input type="checkbox" data-field="fragile">
+          <span>Fragile</span>
+        </label>
         <label class="row-weight">
           <input data-field="weight" inputmode="decimal" placeholder="Weight" autocomplete="off" aria-label="Weight of one box">
           <span data-role="row-weight-unit"></span>
@@ -509,6 +479,7 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
     const qty = query<HTMLInputElement>(row, '[data-field="qty"]')
     setValue(qty, type.qty)
     setInvalid(qty, issues[`types[${index}].qty`])
+    query<HTMLInputElement>(row, '[data-field="fragile"]').checked = type.fragile
     const weight = query<HTMLInputElement>(row, '[data-field="weight"]')
     setValue(weight, type.weight)
     setInvalid(weight, issues[`types[${index}].weight`])
@@ -537,7 +508,6 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
     payloadInput.disabled = preset !== null
     setInvalid(payloadInput, derived.issues['container.maxWeight'])
     setText(payloadUnit, draft.weightUnit)
-    uprightCheckbox.checked = draft.keepUpright
     for (const button of modeButtons) {
       const on = button.dataset.loadMode === draft.mode
       button.classList.toggle('active', on)
@@ -562,11 +532,9 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
     const result = derived.result
     clearButton.disabled = draft.types.length === 0
     excelButton.disabled = !result
+    footerHint.hidden = notice === null
     footerHint.classList.toggle('error', notice?.error ?? false)
-    setText(
-      footerHint,
-      notice?.text ?? (!result ? 'Fix the inputs first' : 'Results update as you type'),
-    )
+    setText(footerHint, notice?.text ?? '')
   }
 
   store.subscribe((state) => {

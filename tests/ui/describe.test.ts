@@ -92,13 +92,14 @@ describe('summarizeStatus', () => {
   it('names one oversized type, lists the others, and says the rest still ships', () => {
     let draft = edits.setContainerType(exampleDraft(), 'custom')
     draft = edits.setContainer(draft, 'h', '60')
-    draft = edits.setKeepUpright(draft, true)
+    // The 96 in pantry would fit lying down, but a fragile box stays upright.
+    draft = edits.setFragile(draft, 'p249624', true)
     const status = statusOf(draft)
     expect(status).toMatchObject({ level: 'impossible', label: 'Impossible' })
     expect(status.text).toContain('P249624 (24 in x 24 in x 96 in)')
     expect(status.lines).toEqual([
       'P249624: 14 boxes cannot ship in this container',
-      'Everything else fits in 4 containers.',
+      'Everything else fits in 2 containers.',
     ])
   })
 

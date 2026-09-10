@@ -80,7 +80,6 @@ export function buildReport(state: AppState, now: Date = new Date()): Workbook |
     [lengthHeader('Container width'), length(scenario.container.w)],
     [lengthHeader('Container height'), length(scenario.container.h)],
     [volumeHeader('Container volume, each'), volume(containerVolume)],
-    ['Keep boxes upright', scenario.keepUpright ? 'Yes' : 'No'],
     ['Loading mode', draft.mode === 'even' ? 'Even' : 'Optimize'],
     ['Weight unit', weightUnit],
     ['Payload per container', maxWeight > 0 ? weight(maxWeight) : 'not set'],
@@ -126,6 +125,7 @@ export function buildReport(state: AppState, now: Date = new Date()): Workbook |
       percent(capacity > 0 ? placedVolume / capacity : 0),
       t.weight ? weight(t.weight) : null,
       t.weight ? weight(t.weight * n) : null,
+      t.fragile ? 'Yes' : 'No',
     ]
   })
 
@@ -177,9 +177,10 @@ export function buildReport(state: AppState, now: Date = new Date()): Workbook |
         'Share of capacity',
         weightHeader('Weight each'),
         weightHeader('Total weight'),
+        'Fragile',
       ],
       rows: boxes,
-      widths: [5, 22, 10, 12, 12, 12, 11, 9, 10, 20, 22, 18, 15, 16],
+      widths: [5, 22, 10, 12, 12, 12, 11, 9, 10, 20, 22, 18, 15, 16, 9],
     },
     {
       name: 'Placements',

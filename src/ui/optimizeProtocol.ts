@@ -4,7 +4,6 @@ import type { BoxType, Container, LoadMode, MultiPackProgress, MultiPackResult }
 export interface OptimizeRequest {
   container: Container
   types: BoxType[]
-  keepUpright: boolean
   mode: LoadMode
   allocation: Record<string, number>[] | undefined
   optimizeRuns: number

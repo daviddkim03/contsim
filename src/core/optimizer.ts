@@ -11,7 +11,6 @@ export interface OptimizeProgress {
 }
 
 export interface OptimizeOptions {
-  keepUpright: boolean
   objective: Objective
   /** What the container may carry; 0 or missing means no limit. */
   maxWeight?: number
@@ -83,7 +82,7 @@ export function optimize(
     const result = pack(
       container,
       active.map((t) => ({ ...t, qty: kept[t.id] ?? 0 })),
-      { keepUpright: options.keepUpright, maxWeight: options.maxWeight, order, skipChecks },
+      { maxWeight: options.maxWeight, order, skipChecks },
     )
     const report = options.onProgress?.({
       runs,

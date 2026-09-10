@@ -25,7 +25,6 @@ export function exampleDraft(): Draft {
     weightUnit: 'kg',
     // The 20 ft preset in inches, so switching to Custom starts from a real container.
     container: { l: '232.2', w: '92.6', h: '94.2' },
-    keepUpright: false,
     unit: 'in',
     types: ORDER.map(([code, qty], i) => {
       const item = findCatalogItem(code)
@@ -37,6 +36,7 @@ export function exampleDraft(): Draft {
         name: code,
         ...catalogTexts(item, 'in'),
         weight: catalogWeightText(item, 'kg'),
+        fragile: false,
         qty: String(qty),
         color: PALETTE[i % PALETTE.length]!,
       }

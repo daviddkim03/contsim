@@ -1,5 +1,7 @@
 import { findImpossibility } from './feasibility'
 import {
+  above,
+  againstWall,
   boxWeight,
   covered,
   insideContainer,
@@ -21,7 +23,7 @@ import type {
 } from './types'
 import { validateScenario } from './validate'
 
-export const DEFAULT_PACK_OPTIONS: PackOptions = { keepUpright: false, order: 'volume-desc' }
+export const DEFAULT_PACK_OPTIONS: PackOptions = { order: 'volume-desc' }
 
 /**
  * Extreme-point first-fit packer (PROJECT.md section 4.2).
@@ -43,7 +45,6 @@ export function pack(
   const start = performance.now()
   // Explicit undefined must not override a default, so no object spread here.
   const opts: PackOptions = {
-    keepUpright: options.keepUpright ?? DEFAULT_PACK_OPTIONS.keepUpright,
     order: options.order ?? DEFAULT_PACK_OPTIONS.order,
     maxWeight: options.maxWeight ?? 0,
     skipChecks: options.skipChecks ?? false,
@@ -84,6 +85,8 @@ export function pack(
   const maxWeight = opts.maxWeight ?? 0
   let weight = 0
   const placements: Placement[] = []
+  /** Boxes that may carry nothing above them. */
+  const fragile: Box[] = []
   const unplaced: Record<string, number> = {}
   let eps: Point[] = [{ x: 0, y: 0, z: 0 }]
   const sizesByDims = new Map<string, Size[]>()
@@ -92,7 +95,9 @@ export function pack(
   const stuck = new Set<string>()
 
   for (const item of items) {
-    const key = `${item.dims.l},${item.dims.w},${item.dims.h}`
+    // Fragility changes both the orientations and where a box may go, so it
+    // belongs in the key that caches sizes and remembers dead ends.
+    const key = `${item.dims.l},${item.dims.w},${item.dims.h},${item.fragile}`
     if (stuck.has(key)) {
       unplaced[item.typeId] = (unplaced[item.typeId] ?? 0) + 1
       continue
@@ -106,11 +111,11 @@ export function pack(
     }
     let sizes = sizesByDims.get(key)
     if (!sizes) {
-      sizes = orientations(item.dims, opts.keepUpright)
+      sizes = orientations(item.dims, item.fragile)
       sizesByDims.set(key, sizes)
     }
 
-    const hit = findPosition(eps, sizes, container, placements)
+    const hit = findPosition(eps, sizes, container, placements, fragile, item.fragile)
     if (!hit) {
       stuck.add(key)
       unplaced[item.typeId] = (unplaced[item.typeId] ?? 0) + 1
@@ -119,6 +124,7 @@ export function pack(
 
     const box: Placement = { typeId: item.typeId, ...hit.point, ...hit.size }
     placements.push(box)
+    if (item.fragile) fragile.push(box)
     weight += itemWeight
     stuck.clear()
     eps = nextExtremePoints(eps, hit.point, box, placements, container)
@@ -146,15 +152,38 @@ function findPosition(
   sizes: Size[],
   container: Container,
   placed: Box[],
+  fragile: Box[],
+  wantsWall: boolean,
 ): { point: Point; size: Size } | null {
   for (const point of eps) {
     for (const size of sizes) {
-      if (insideContainer(point, size, container) && !overlapsAny(point, size, placed)) {
-        return { point, size }
+      for (const candidate of wantsWall ? slidToWalls(point, size, container) : [point]) {
+        if (candidate.x < 0 || candidate.y < 0) continue
+        if (!insideContainer(candidate, size, container)) continue
+        if (wantsWall && !againstWall(candidate, size, container)) continue
+        if (overlapsAny(candidate, size, placed)) continue
+        // Nothing may sit above a fragile box, whatever it is.
+        if (fragile.some((f) => above(candidate, size, f))) continue
+        return { point: candidate, size }
       }
     }
   }
   return null
+}
+
+/**
+ * A candidate point and the same point slid across to the far walls. Candidate
+ * points are the corners of placed boxes, so without this a box could only
+ * ever reach the walls a placement happens to end on - which for a box that
+ * must touch one (see BoxType.fragile) throws away half the container.
+ */
+function slidToWalls(p: Point, s: Size, c: Container): Point[] {
+  return [
+    p,
+    { ...p, x: c.l - s.dx },
+    { ...p, y: c.w - s.dy },
+    { x: c.l - s.dx, y: c.w - s.dy, z: p.z },
+  ]
 }
 
 function overlapsAny(p: Point, s: Size, placed: Box[]): boolean {

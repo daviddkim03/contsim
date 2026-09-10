@@ -55,7 +55,6 @@ describe('buildReport', () => {
       'Container length (in)': 232.2,
       'Container width (in)': 92.6,
       'Container height (in)': 94.2,
-      'Keep boxes upright': 'No',
       'Weight unit': 'kg',
       'Payload per container': 11000,
       // The placeholder catalog gives every cabinet a weight.
@@ -137,8 +136,7 @@ describe('buildReport', () => {
   })
 
   it('reports in the chosen unit', () => {
-    let draft = edits.setUnit(exampleDraft(), 'cm')
-    draft = edits.setKeepUpright(draft, true)
+    const draft = edits.setUnit(exampleDraft(), 'cm')
     const workbook = buildReport(stateOf(draft), now)!
     const summary = summaryOf(workbook.sheets[0]!.rows)
     expect(summary).toMatchObject({
@@ -146,7 +144,6 @@ describe('buildReport', () => {
       'Container length (cm)': 589.8,
       // 589.8 x 235.2 x 239.3 cm = 33,195,926 cu cm = 33.196 cu m.
       'Container volume, each (m³)': 33.196,
-      'Keep boxes upright': 'Yes',
       'Placements sheet': expect.stringContaining('Lengths are in centimetres.'),
     })
     expect(workbook.sheets[2]!.header[3]).toBe('Length (cm)')
@@ -158,7 +155,6 @@ describe('buildReport', () => {
     const state = stateOf(exampleDraft())
     const scenario = state.derived.scenario!
     const optimized = packMany(scenario.container, scenario.types, {
-      keepUpright: false,
       optimizeRuns: 400,
     })
     const workbook = buildReport(

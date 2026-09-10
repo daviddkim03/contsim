@@ -44,7 +44,6 @@ export function startAutoOptimizer(store: Store): AutoOptimizer {
   function runInline(request: OptimizeRequest): void {
     try {
       const result = packMany(request.container, request.types, {
-        keepUpright: request.keepUpright,
         mode: request.mode,
         allocation: request.allocation,
         optimizeRuns: request.optimizeRuns,
@@ -63,7 +62,6 @@ export function startAutoOptimizer(store: Store): AutoOptimizer {
     const request: OptimizeRequest = {
       container: scenario.container,
       types: scenario.types,
-      keepUpright: scenario.keepUpright,
       mode: draft.mode,
       allocation: allocationOf(draft),
       optimizeRuns: DEFAULT_OPTIMIZE_RUNS,

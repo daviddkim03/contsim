@@ -88,11 +88,11 @@ describe('derive', () => {
           w: '1',
           h: '1',
           weight: 'x',
+          fragile: false,
           qty: '-3',
           color: '#000',
         },
       ],
-      keepUpright: true,
       unit: 'mm',
     }
     expect(() => derive(draft)).not.toThrow()
@@ -269,7 +269,7 @@ describe('edits', () => {
     const types = [{ ...draft.types[0]!, id: 'new', qty: '7' }]
     const plain = edits.applyImport(draft, { types, unit: 'in', weightUnit: 'kg', container: null })
     expect(plain.types).toBe(types)
-    expect(plain).toMatchObject({ unit: 'in', containerType: 'custom', keepUpright: false })
+    expect(plain).toMatchObject({ unit: 'in', containerType: 'custom' })
 
     // Without container settings the file's unit still applies, so the container converts.
     const metric = edits.applyImport(draft, {
@@ -289,14 +289,12 @@ describe('edits', () => {
         containerType: '40ft-hc',
         container: null,
         maxWeight: '',
-        keepUpright: true,
         mode: 'optimize',
       },
     })
     expect(preset).toMatchObject({
       containerType: '40ft-hc',
       unit: 'mm',
-      keepUpright: true,
       mode: 'optimize',
     })
 
@@ -308,7 +306,6 @@ describe('edits', () => {
         containerType: 'custom',
         container: { l: '1', w: '2', h: '3' },
         maxWeight: '4000',
-        keepUpright: false,
         mode: 'even',
       },
     })
@@ -350,7 +347,7 @@ describe('hand-placed counts', () => {
     expect(allocationOf(edits.setContainerType(pinned, '40ft-hc'))).toBeUndefined()
     expect(allocationOf(edits.setMode(pinned, 'optimize'))).toBeUndefined()
     expect(allocationOf(edits.setUnit(pinned, 'mm'))).toBeUndefined()
-    expect(allocationOf(edits.setKeepUpright(pinned, true))).toBeUndefined()
+    expect(allocationOf(edits.setFragile(pinned, pinned.types[0]!.id, true))).toBeUndefined()
     expect(allocationOf(edits.removeType(pinned, '18'))).toBeUndefined()
     expect(allocationOf(edits.setCustom(pinned, '18', 'Crate'))).toBeUndefined()
     // Still there, so the app can tell a stale split from none at all.
@@ -484,7 +481,6 @@ describe('shownResult and shownContainer', () => {
     expect(shownResult(store.get())).toBe(quick)
     const scenario = store.get().derived.scenario!
     const optimized = packMany(scenario.container, scenario.types, {
-      keepUpright: false,
       optimizeRuns: 200,
     })
     store.setOptimize({ status: 'done', result: optimized })

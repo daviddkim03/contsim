@@ -1,19 +1,23 @@
 import { insideContainer, overlaps } from '../../src/core/geometry'
 import type { BoxType, Container, PackResult, Scenario } from '../../src/core/types'
 
-export const boxType = (id: string, l: number, w: number, h: number, qty: number): BoxType => ({
+export const boxType = (
+  id: string,
+  l: number,
+  w: number,
+  h: number,
+  qty: number,
+  extra: Partial<BoxType> = {},
+): BoxType => ({
   id,
   name: `Box ${id.toUpperCase()}`,
   dims: { l, w, h },
   qty,
   color: '#888888',
+  ...extra,
 })
 
-const scenario = (container: Container, types: BoxType[], keepUpright = false): Scenario => ({
-  container,
-  types,
-  keepUpright,
-})
+const scenario = (container: Container, types: BoxType[]): Scenario => ({ container, types })
 
 export const tiny = scenario({ l: 2, w: 2, h: 2 }, [boxType('unit', 1, 1, 1, 8)])
 export const cube27 = scenario({ l: 3, w: 3, h: 3 }, [boxType('unit', 1, 1, 1, 27)])
@@ -37,7 +41,7 @@ export const perf300 = scenario({ l: 100, w: 100, h: 100 }, [
  * for `scenario`, or null when the packing is valid.
  */
 export function packingViolation(scenario: Scenario, result: PackResult): string | null {
-  const { container, types, keepUpright } = scenario
+  const { container, types } = scenario
   const byId = new Map(types.map((t) => [t.id, t]))
   const sorted = (a: number, b: number, c: number) => [a, b, c].sort((x, y) => x - y).join(',')
 
@@ -48,7 +52,22 @@ export function packingViolation(scenario: Scenario, result: PackResult): string
     if (sorted(p.dx, p.dy, p.dz) !== sorted(t.dims.l, t.dims.w, t.dims.h)) {
       return `not an orientation of ${t.id}: ${JSON.stringify(p)}`
     }
-    if (keepUpright && p.dz !== t.dims.h) return `not upright: ${JSON.stringify(p)}`
+    if (t.fragile) {
+      if (p.dz !== t.dims.h) return `fragile but not upright: ${JSON.stringify(p)}`
+      const onAWall =
+        p.x === 0 || p.y === 0 || p.x + p.dx === container.l || p.y + p.dy === container.w
+      if (!onAWall) return `fragile but not against a wall: ${JSON.stringify(p)}`
+      for (const other of result.placements) {
+        if (other === p) continue
+        const stacked =
+          other.z >= p.z + p.dz &&
+          other.x < p.x + p.dx &&
+          p.x < other.x + other.dx &&
+          other.y < p.y + p.dy &&
+          p.y < other.y + other.dy
+        if (stacked) return `box on top of fragile ${t.id}: ${JSON.stringify(other)}`
+      }
+    }
   }
 
   const ps = result.placements

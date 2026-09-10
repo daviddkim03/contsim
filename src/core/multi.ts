@@ -70,7 +70,6 @@ export interface MultiPackProgress {
 }
 
 export interface MultiPackOptions {
-  keepUpright: boolean
   /** Default 'optimize', which is what the packer did before modes existed. */
   mode?: LoadMode
   /**
@@ -182,7 +181,7 @@ export function packMany(
   for (const t of types) {
     if (t.qty === 0) continue
     const origin = { x: 0, y: 0, z: 0 }
-    const fitsAlone = orientations(t.dims, options.keepUpright).some((s) =>
+    const fitsAlone = orientations(t.dims, t.fragile === true).some((s) =>
       insideContainer(origin, s, container),
     )
     const weight = boxWeight(t)
@@ -216,7 +215,6 @@ export function packMany(
     if (optimizing && runs < maxRuns) {
       const before = runs
       const r = optimize(container, subset, {
-        keepUpright: options.keepUpright,
         maxWeight,
         objective: 'keep-most-volume',
         maxRuns: maxRuns - runs,
@@ -232,9 +230,7 @@ export function packMany(
     }
     runs++
     // skipChecks: what is left may well exceed one container; that is the point.
-    return asOwnPacking(
-      pack(container, subset, { keepUpright: options.keepUpright, maxWeight, skipChecks: true }),
-    )
+    return asOwnPacking(pack(container, subset, { maxWeight, skipChecks: true }))
   }
 
   /** Fills containers one after another; `shareFor` says what to offer each one. */

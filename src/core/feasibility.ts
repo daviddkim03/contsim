@@ -2,7 +2,6 @@ import { boxWeight, insideContainer, orientations, volume } from './geometry'
 import type { BoxType, Container, Dims, Impossibility } from './types'
 
 export interface FeasibilityOptions {
-  keepUpright: boolean
   /** What the container may carry; 0 or missing means no limit. */
   maxWeight?: number
 }
@@ -22,7 +21,7 @@ export function findImpossibility(
   const active = types.filter((t) => t.qty > 0)
 
   for (const t of active) {
-    const fitsSomehow = orientations(t.dims, opts.keepUpright).some((s) =>
+    const fitsSomehow = orientations(t.dims, t.fragile === true).some((s) =>
       insideContainer(ORIGIN, s, container),
     )
     if (!fitsSomehow) return { kind: 'oversize', typeId: t.id }
@@ -38,7 +37,7 @@ export function findImpossibility(
   if (boxVolume > containerVolume) return { kind: 'volume', boxVolume, containerVolume }
 
   for (const t of active) {
-    const maxAlone = maxOfTypeAlone(container, t.dims, opts.keepUpright)
+    const maxAlone = maxOfTypeAlone(container, t.dims, t.fragile === true)
     if (t.qty > maxAlone) return { kind: 'upper-bound', typeId: t.id, qty: t.qty, maxAlone }
   }
 
@@ -65,7 +64,7 @@ export function findImpossibility(
  * mixed orientations can pack more (four 3x2 boxes fit in 5x5 as a pinwheel
  * while every grid holds only two).
  */
-export function maxOfTypeAlone(container: Container, dims: Dims, keepUpright: boolean): number {
+export function maxOfTypeAlone(container: Container, dims: Dims, keepUpright = false): number {
   const { l, w, h } = dims
   const horizontal = keepUpright ? Math.min(l, w) : Math.min(l, w, h)
   const vertical = keepUpright ? h : Math.min(l, w, h)

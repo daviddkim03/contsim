@@ -6,7 +6,7 @@ import { exampleScenario, mixedScenario } from '../../src/scenarios'
 import { boxType, overfull, oversize, packingViolation } from './fixtures'
 
 const run = (s: Scenario, objective: Objective = 'keep-most-boxes', maxRuns?: number) =>
-  optimize(s.container, s.types, { keepUpright: s.keepUpright, objective, maxRuns })
+  optimize(s.container, s.types, { objective, maxRuns })
 
 const total = (q: Record<string, number>) => Object.values(q).reduce((a, b) => a + b, 0)
 
@@ -72,7 +72,6 @@ describe('optimize', () => {
     // seven 5x5x5 boxes fit together (volume 875, count 7).
     const s: Scenario = {
       container: { l: 10, w: 10, h: 10 },
-      keepUpright: false,
       types: [boxType('big', 10, 10, 10, 1), boxType('small', 5, 5, 5, 7)],
     }
     expect(run(s, 'keep-most-boxes').kept).toEqual({ big: 0, small: 7 })
@@ -83,7 +82,6 @@ describe('optimize', () => {
     // Only eight 5x5x5 cubes fit; twenty are requested across two types.
     const s: Scenario = {
       container: { l: 10, w: 10, h: 10 },
-      keepUpright: false,
       types: [boxType('a', 5, 5, 5, 10), boxType('b', 5, 5, 5, 10)],
     }
     const even = run(s, 'cut-evenly')
@@ -96,7 +94,6 @@ describe('optimize', () => {
     const s = exampleScenario()
     const seen: OptimizeProgress[] = []
     const r = optimize(s.container, s.types, {
-      keepUpright: false,
       objective: 'keep-most-boxes',
       onProgress: (p) => {
         seen.push(p)

@@ -7,7 +7,6 @@ self.onmessage = ({ data }: MessageEvent<OptimizeRequest>) => {
   try {
     let reported = -1
     const result = packMany(data.container, data.types, {
-      keepUpright: data.keepUpright,
       mode: data.mode,
       allocation: data.allocation,
       optimizeRuns: data.optimizeRuns,

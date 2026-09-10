@@ -155,18 +155,20 @@ test('a box that fits in no container is impossible, and the rest still ships', 
 }) => {
   await page.locator('[data-field="containerType"]').selectOption('custom')
   await page.locator('[data-field="container.h"]').fill('60')
-  await page.locator('[data-field="keepUpright"]').check()
+  // The pantry fits lying down, but a fragile box stays upright.
+  await row(page, 4).locator('[data-field="fragile"]').check()
   await expect(badge(page)).toHaveText('Impossible')
   await expect(page.locator('.message')).toHaveText(
     'P249624 (24 in x 24 in x 96 in) does not fit in the container in any allowed orientation.',
   )
   await expect(page.locator('.details li')).toHaveText([
     'P249624: 14 boxes cannot ship in this container',
-    'Everything else fits in 4 containers.',
+    'Everything else fits in 2 containers.',
   ])
   await expect(page.locator('.legend-row.short .legend-count')).toContainText('0 / 14')
 
   // Too flat for anything at all.
+  await row(page, 4).locator('[data-field="fragile"]').uncheck()
   await page.locator('[data-field="container.h"]').fill('10')
   await expect(page.locator('.message')).toContainText('18 (18 in x 24 in x 34.5 in)')
   await expect(page.locator('.details li')).toHaveCount(5)
@@ -517,19 +519,19 @@ test('the optimizer runs by itself after an edit and the result stays consistent
   )
 })
 
-test('the Excel export imports back: order, container, unit and upright setting', async ({
-  page,
-}) => {
+test('the Excel export imports back: order, container, units and fragility', async ({ page }) => {
   await page.locator('[data-field="containerType"]').selectOption('40ft-hc')
-  await page.locator('[data-field="keepUpright"]').check()
+  await row(page, 1).locator('[data-field="fragile"]').check()
   await page.locator('[data-load-mode="optimize"]').click()
-  await expect(badge(page)).toHaveText('Fits')
+  // Fragile cabinets need wall space, so the order no longer fits in one.
+  await expect(badge(page)).toHaveText('2 containers')
+  await expect(page.locator('[data-role="progress"]')).toBeHidden({ timeout: 15_000 })
   const downloadPromise = page.waitForEvent('download')
   await page.locator('[data-action="export-excel"]').click()
   const path = (await (await downloadPromise).path())!
 
   await page.locator('[data-field="containerType"]').selectOption('20ft')
-  await page.locator('[data-field="keepUpright"]').uncheck()
+  await row(page, 1).locator('[data-field="fragile"]').uncheck()
   await page.locator('[data-load-mode="even"]').click()
   await qty(page, 0).fill('3')
   await row(page, 4).locator('[data-action="remove"]').click()
@@ -548,36 +550,29 @@ test('the Excel export imports back: order, container, unit and upright setting'
   await expect(page.locator('.box-row')).toHaveCount(5)
   await expect(qty(page, 0)).toHaveValue('28')
   await expect(page.locator('[data-field="containerType"]')).toHaveValue('40ft-hc')
-  await expect(page.locator('[data-field="keepUpright"]')).toBeChecked()
+  await expect(row(page, 1).locator('[data-field="fragile"]')).toBeChecked()
   await expect(page.locator('[data-load-mode="optimize"]')).toHaveAttribute('aria-pressed', 'true')
-  await expect(badge(page)).toHaveText('Fits')
-  // The message stays until the next change.
+  await expect(badge(page)).toHaveText('2 containers')
+  // The message stays until the next change, then goes away.
   await expect(hint(page)).toContainText('Imported 5 rows')
   await qty(page, 0).fill('29')
-  await expect(hint(page)).toHaveText('Results update as you type')
+  await expect(hint(page)).toBeHidden()
 })
 
-test('Import reads an order from the template and asks which unit it is in', async ({ page }) => {
-  const downloadPromise = page.waitForEvent('download')
-  await page.locator('[data-action="template"]').click()
-  const download = await downloadPromise
-  expect(download.suggestedFilename()).toBe('contsim-order-template.xlsx')
-  // Saved under its real name, because the dialog shows the name of the file picked.
-  const path = test.info().outputPath('contsim-order-template.xlsx')
-  await download.saveAs(path)
-
-  await pickFile(page, path)
+test('Import shows what a file holds before anything changes', async ({ page }) => {
+  const csv = 'Code,Qty,W,D,H\n3036,4,,,\n2442,2,,,\nCrate,1,40,30,20\nNope,1,,,\n'
+  await pickFile(page, csvFile('kitchen.csv', csv))
   await expect(dialog(page)).toBeVisible()
-  await expect(dialog(page).locator('[data-role="file"]')).toHaveText('contsim-order-template.xlsx')
+  await expect(dialog(page).locator('[data-role="file"]')).toHaveText('kitchen.csv')
   await expect(dialog(page).locator('[data-field="import-unit"]')).toHaveValue('in')
   await expect(dialog(page).locator('[data-role="counts"]')).toHaveText(
-    '3 box rows, 7 boxes. Replaces the current 5 rows.',
+    '3 box rows, 7 boxes. 1 row will be skipped. Replaces the current 5 rows.',
   )
   // Backing out changes nothing.
   await dialog(page).locator('[data-action="cancel"]').click()
   await expect(page.locator('.box-row')).toHaveCount(5)
 
-  await importFile(page, path)
+  await importFile(page, csvFile('kitchen.csv', csv))
   await expect(hint(page)).toContainText('Imported 3 rows, 7 boxes')
   await expect(page.locator('.box-row')).toHaveCount(3)
   await expect(search(page, 0)).toHaveValue('3036')

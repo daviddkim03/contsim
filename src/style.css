@@ -330,9 +330,20 @@ button.star.on:hover {
 
 .row-bottom {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
+}
+
+/* Fragile: upright, against a wall, nothing on top. */
+.row-fragile {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.row-fragile input {
+  width: 13px;
+  height: 13px;
 }
 
 /* Weight of one box, beside its quantity. */
@@ -1115,6 +1126,10 @@ button.primary:disabled {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 4px;
+}
+
+.sidebar-actions .hint[hidden] {
+  display: none;
 }
 
 .title-actions {

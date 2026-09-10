@@ -43,6 +43,11 @@ export interface BoxType {
    * which is the same as weightless as far as the packer is concerned.
    */
   weight?: number
+  /**
+   * A fragile box travels upright, against a wall of the container rather
+   * than buried in the middle, and never carries another box on top.
+   */
+  fragile?: boolean
 }
 
 export interface Placement extends Point, Size {
@@ -53,7 +58,6 @@ export interface Placement extends Point, Size {
 export interface Scenario {
   container: Container
   types: BoxType[]
-  keepUpright: boolean
 }
 
 /**
@@ -100,8 +104,6 @@ export type Ordering =
   | { shuffle: number }
 
 export interface PackOptions {
-  /** Only allow rotations around the vertical axis (height stays vertical). */
-  keepUpright: boolean
   order: Ordering
   /**
    * What the container may carry, in the same unit as BoxType.weight. A box
