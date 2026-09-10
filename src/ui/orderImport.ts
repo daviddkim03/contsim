@@ -17,7 +17,8 @@ import type { CellValue, Row, SheetRows } from './spreadsheet'
 import { newTypeId, type BoxTypeDraft, type ScenarioImport } from './state'
 import { UNITS, convertLength, convertWeight, type Unit, type WeightUnit } from './units'
 
-type Column = 'code' | 'qty' | 'first' | 'second' | 'third' | 'weight' | 'fragile' | 'color'
+type Column =
+  'code' | 'qty' | 'first' | 'second' | 'third' | 'size' | 'weight' | 'fragile' | 'color'
 
 /** Header words per column. "length" and "width" both mean the first size unless both appear (see importOrder). */
 const HEADERS: Record<Column, readonly string[]> = {
@@ -37,6 +38,7 @@ const HEADERS: Record<Column, readonly string[]> = {
   ],
   qty: ['qty', 'quantity', 'count', 'pcs', 'pieces', 'units', 'amount', 'q', 'requested'],
   first: ['w', 'width', 'l', 'length'],
+  size: ['size', 'dimensions', 'dims'],
   second: ['d', 'depth'],
   third: ['h', 'height'],
   weight: ['weight', 'wt', 'mass', 'weighteach', 'weightper', 'weightperbox', 'unitweight'],
@@ -101,6 +103,34 @@ export function parseHeader(cell: CellValue | undefined): Header | null {
 
 const cellText = (cell: CellValue | undefined): string =>
   cell === undefined ? '' : String(cell).trim()
+
+/** "30 × 12 × 36" as three numbers, or null when the cell is not a size. */
+/**
+ * A custom container's size: the "Container size" cell of a workbook this app
+ * wrote, or the three separate rows an older one has.
+ */
+function containerDims(
+  values: Map<string, CellValue | undefined>,
+): [string, string, string] | null {
+  const sizeKey = [...values.keys()].find((k) => k.startsWith('container size'))
+  const size = sizeKey ? splitSize(values.get(sizeKey)) : null
+  if (size) return size.map(String) as [string, string, string]
+
+  const dims = ['length', 'width', 'height'].map((side) => {
+    const entry = [...values.entries()].find(([k]) => k.startsWith(`container ${side}`))
+    const value = entry ? parseLength(entry[1]) : null
+    return value !== null && value > 0 ? String(value) : null
+  })
+  return dims.every((d): d is string => d !== null) ? (dims as [string, string, string]) : null
+}
+
+function splitSize(cell: CellValue | undefined): [number, number, number] | null {
+  const parts = cellText(cell)
+    .split(/[×x*]/i)
+    .map((part) => Number(part.trim().replace(',', '.')))
+  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n) || n <= 0)) return null
+  return parts as [number, number, number]
+}
 
 /** A whole number, from a number or a numeric string. */
 function parseQuantity(cell: CellValue | undefined): number | null {
@@ -275,10 +305,12 @@ export function importOrder(
       continue
     }
 
-    const size = sizeColumns.map((column) => {
-      if (!column) return null
-      const value = parseLength(row[column.index])
-      return value === null || value <= 0 ? null : convertLength(value, column.unit ?? unit, unit)
+    // Either three columns, or one "L × W × H" cell as the export writes it.
+    const combined = columns.size ? splitSize(row[columns.size.index]) : null
+    const size = sizeColumns.map((column, i) => {
+      const value = column ? parseLength(row[column.index]) : (combined?.[i] ?? null)
+      if (value === null || value <= 0) return null
+      return convertLength(value, column?.unit ?? columns.size?.unit ?? unit, unit)
     })
     if (size.every((v): v is number => v !== null)) {
       const [l, w, h] = size.map(String) as [string, string, string]
@@ -355,12 +387,8 @@ export function readSummary(
     }
   }
 
-  const dims = ['length', 'width', 'height'].map((side) => {
-    const entry = [...values.entries()].find(([k]) => k.startsWith(`container ${side}`))
-    const value = entry ? parseLength(entry[1]) : null
-    return value !== null && value > 0 ? String(value) : null
-  })
-  if (!dims.every((d): d is string => d !== null)) return null
+  const dims = containerDims(values)
+  if (!dims) return null
   return {
     container: {
       containerType: 'custom',
@@ -383,19 +411,67 @@ export function importWorkbook(
   weightUnit: WeightUnit,
   existing: readonly BoxTypeDraft[],
 ): ImportParse {
-  const byName = (name: string) => sheets.find((s) => s.name.trim().toLowerCase() === name)
-  const boxes = byName('boxes')
-  const summary = byName('summary')
-  if (boxes && summary) {
-    const read = readSummary(summary.rows, unit, weightUnit)
-    const parsed = importOrder(
-      boxes.rows,
-      read?.unit ?? unit,
-      read?.weightUnit ?? weightUnit,
-      existing,
-    )
-    if (!parsed.ok) return parsed
-    return { ok: true, imported: { ...parsed.imported, container: read?.container ?? null } }
+  // A workbook contsim wrote: one sheet per container, each opening with the
+  // settings and carrying its own share of the boxes, so the counts add up.
+  const perContainer = sheets.filter((s) => /^container\s+\d+$/i.test(s.name.trim()))
+  if (perContainer.length > 0) {
+    const read = readSummary(perContainer[0]!.rows, unit, weightUnit)
+    const rows = joinContainerSheets(perContainer)
+    if (rows.length > 1) {
+      const parsed = importOrder(rows, read?.unit ?? unit, read?.weightUnit ?? weightUnit, existing)
+      if (!parsed.ok) return parsed
+      return { ok: true, imported: { ...parsed.imported, container: read?.container ?? null } }
+    }
   }
   return importOrder(sheets[0]!.rows, unit, weightUnit, existing)
+}
+
+/**
+ * The box tables of every container sheet as one order. The same box is on
+ * every sheet that carries one, so the counts are added up here rather than
+ * left to look like a mistake in the file.
+ */
+function joinContainerSheets(sheets: SheetRows[]): Row[] {
+  let header: Row | null = null
+  let codeAt = -1
+  let qtyAt = -1
+  const byCode = new Map<string, Row>()
+  for (const sheet of sheets) {
+    const table = boxTableOf(sheet.rows)
+    if (table.length === 0) continue
+    if (!header) {
+      header = table[0]!
+      header.forEach((cell, i) => {
+        const column = parseHeader(cell)?.column
+        if (column === 'code' && codeAt < 0) codeAt = i
+        if (column === 'qty' && qtyAt < 0) qtyAt = i
+      })
+    }
+    for (const row of table.slice(1)) {
+      const code = cellText(row[codeAt]).toUpperCase()
+      const seen = byCode.get(code)
+      if (!seen) {
+        byCode.set(code, [...row])
+        continue
+      }
+      seen[qtyAt] = (Number(seen[qtyAt]) || 0) + (Number(row[qtyAt]) || 0)
+    }
+  }
+  return header ? [header, ...byCode.values()] : []
+}
+
+/** The box table on a container sheet: its header row, then rows until a blank one. */
+function boxTableOf(rows: Row[]): Row[] {
+  const start = rows.findIndex((row) => {
+    const found = new Set(row.map((cell) => parseHeader(cell)?.column))
+    return found.has('code') && found.has('qty')
+  })
+  if (start < 0) return []
+  const table = [rows[start]!]
+  for (let r = start + 1; r < rows.length; r++) {
+    const row = rows[r]!
+    if (row.every((cell) => cellText(cell) === '')) break
+    table.push(row)
+  }
+  return table
 }

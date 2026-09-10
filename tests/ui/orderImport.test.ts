@@ -170,7 +170,7 @@ describe('importOrder', () => {
 })
 
 describe('importWorkbook', () => {
-  it('round-trips the Excel export: boxes, container, unit and upright', async () => {
+  it('round-trips the Excel export: boxes, container, unit and fragility', async () => {
     let draft = edits.setContainerType(exampleDraft(), '40ft-hc')
     draft = edits.setFragile(draft, draft.types[0]!.id, true)
     draft = edits.setUnit(draft, 'cm')
@@ -227,7 +227,7 @@ describe('importWorkbook', () => {
 })
 
 describe('readSummary', () => {
-  it('names a preset, or gives custom dimensions, with unit, upright and mode', () => {
+  it('names a preset, or gives custom dimensions, with unit and mode', () => {
     expect(
       readSummary(
         [
@@ -249,6 +249,23 @@ describe('readSummary', () => {
       unit: 'mm',
       weightUnit: 'kg',
     })
+    // The size as this app writes it, in one cell.
+    expect(
+      readSummary(
+        [
+          ['Container type', 'custom'],
+          ['Container size (in)', '100 × 50 × 40.5'],
+        ],
+        'in',
+        'kg',
+      )?.container,
+    ).toEqual({
+      containerType: 'custom',
+      container: { l: '100', w: '50', h: '40.5' },
+      maxWeight: '',
+      mode: 'even',
+    })
+    // The three separate rows an older workbook has.
     expect(
       readSummary(
         [

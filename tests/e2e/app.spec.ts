@@ -631,7 +631,7 @@ test('Export Excel waits for the inputs to be valid', async ({ page }) => {
   await expect(button).toBeEnabled()
 })
 
-test('Export Excel downloads a workbook with summary, containers, boxes and placements', async ({
+test('Export Excel downloads a sheet per container, with its boxes and two views', async ({
   page,
 }) => {
   await expect(progress(page)).toBeHidden()
@@ -641,31 +641,59 @@ test('Export Excel downloads a workbook with summary, containers, boxes and plac
   expect(download.suggestedFilename()).toBe('contsim-packing.xlsx')
   const parts = unzip(new Uint8Array(await readFile((await download.path())!)))
 
+  // The example order needs two containers, so there are two sheets and no others.
   expect(text(parts.get('xl/workbook.xml')!)).toContain(
-    '<sheet name="Summary" sheetId="1" r:id="rId1"/>' +
-      '<sheet name="Containers" sheetId="2" r:id="rId2"/>' +
-      '<sheet name="Boxes" sheetId="3" r:id="rId3"/>' +
-      '<sheet name="Placements" sheetId="4" r:id="rId4"/>',
+    '<sheet name="Container 1" sheetId="1" r:id="rId1"/>' +
+      '<sheet name="Container 2" sheetId="2" r:id="rId2"/>',
   )
-  const summary = readSheet(text(parts.get('xl/worksheets/sheet1.xml')!))
-  expect(summary).toContainEqual(['Status', '2 containers'])
-  expect(summary).toContainEqual(['Container type', '20 ft'])
-  expect(summary).toContainEqual(['Container length (in)', 232.2])
-  expect(summary).toContainEqual(['Containers needed', 2])
-  expect(summary).toContainEqual(['Loading mode', 'Even'])
-  expect(summary).toContainEqual(['Boxes placed', 140])
-  const containers = readSheet(text(parts.get('xl/worksheets/sheet2.xml')!))
-  expect(containers).toHaveLength(3)
-  expect(containers[1]!.slice(0, 2)).toEqual([1, 70])
-  expect(containers[2]!.slice(0, 2)).toEqual([2, 70])
-  const boxes = readSheet(text(parts.get('xl/worksheets/sheet3.xml')!))
-  expect(boxes).toHaveLength(6)
-  expect(boxes[1]!.slice(1, 9)).toEqual(['18', '#f59e0b', 18, 24, 34.5, 28, 28, 0])
-  const placements = readSheet(text(parts.get('xl/worksheets/sheet4.xml')!))
-  expect(placements).toHaveLength(141)
-  expect(placements[1]!.slice(0, 6)).toEqual([1, 1, 'P249624', 0, 0, 0])
-  expect([...(placements[1]!.slice(6, 9) as number[])].sort((a, b) => a - b)).toEqual([24, 24, 96])
-  expect(placements[140]![0]).toBe(2)
+  expect(parts.has('xl/worksheets/sheet3.xml')).toBe(false)
+
+  const sheet = readSheet(text(parts.get('xl/worksheets/sheet1.xml')!))
+  expect(sheet).toContainEqual([
+    'Container 1 of 2',
+    expect.stringMatching(/^\d{4}-\d\d-\d\d \d\d:\d\d$/),
+  ])
+  expect(sheet).toContainEqual(['Container type', '20 ft'])
+  expect(sheet).toContainEqual(['Container size (in)', '232.2 × 92.6 × 94.2'])
+  expect(sheet).toContainEqual(['Payload per container', 11000])
+  expect(sheet).toContainEqual(['Loading mode', 'Even'])
+  expect(sheet).toContainEqual(['Boxes', 70])
+
+  // The box table, then a count that adds up to what the container holds.
+  const header = sheet.findIndex((row) => row[1] === 'Box')
+  expect(sheet[header]).toEqual([
+    undefined,
+    'Box',
+    'Size (in)',
+    'Weight each (kg)',
+    'Weight (kg)',
+    'Fragile',
+    'Count',
+  ])
+  const table = sheet.slice(
+    header + 1,
+    sheet.findIndex((row, i) => i > header && row.length === 0),
+  )
+  expect(table.length).toBeGreaterThan(0)
+  expect(table.reduce((n, row) => n + (row[6] as number), 0)).toBe(70)
+  const cabinet = table.find((row) => row[1] === '18')!
+  expect(cabinet[2]).toBe('18 × 24 × 34.5')
+  expect(cabinet[3]).toBe(27)
+  expect(cabinet[5]).toBe('No')
+  expect(cabinet[6]).toBeGreaterThan(0)
+
+  // Both views, drawn as rows of cells past the table columns.
+  const top = sheet.findIndex((row) => String(row[0] ?? '').startsWith('Top view'))
+  const side = sheet.findIndex((row) => String(row[0] ?? '').startsWith('Side view'))
+  expect(top).toBeGreaterThan(header)
+  expect(side).toBeGreaterThan(top)
+  expect(sheet[top]![0]).toBe('Top view - length 232.2 × width 92.6 in')
+  expect(sheet[side]![0]).toBe('Side view - length 232.2 × height 94.2 in')
+  // Painted cells carry a style and no value, so the reader sees empty rows of 87.
+  const xml = text(parts.get('xl/worksheets/sheet1.xml')!)
+  expect(xml).toMatch(/<c r="H\d+" s="[3-9]\d*"\/>/)
+  expect(xml).toContain('<col min="8" max="16384"')
+  expect(xml).toMatch(/<row r="\d+" ht="6.75" customHeight="1">/)
 })
 
 test('importing a file without an order in it changes nothing and says so', async ({ page }) => {

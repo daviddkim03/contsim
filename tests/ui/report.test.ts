@@ -10,7 +10,7 @@ import {
   type AppState,
   type Draft,
 } from '../../src/ui/state'
-import type { Cell } from '../../src/ui/xlsx'
+import type { Block, Cell, Sheet } from '../../src/ui/xlsx'
 
 const now = new Date(2026, 8, 2, 14, 5, 59)
 
@@ -18,8 +18,28 @@ function stateOf(draft: Draft, patch: Partial<AppState> = {}): AppState {
   return { draft, derived: derive(draft), view: DEFAULT_VIEW, optimize: DEFAULT_OPTIMIZE, ...patch }
 }
 
-/** The Summary sheet as a lookup from item to value. */
-const summaryOf = (rows: Cell[][]) => Object.fromEntries(rows.map(([k, v]) => [String(k), v]))
+/** The settings block at the top of a sheet, as a lookup from label to value. */
+const settingsOf = (sheet: Sheet) =>
+  Object.fromEntries(sheet.rows.slice(0, blankAfter(sheet.rows, 0)).map(([k, v]) => [String(k), v]))
+
+/** The index of the first blank row at or after `from`. */
+function blankAfter(rows: Cell[][], from: number): number {
+  for (let r = from; r < rows.length; r++) if (rows[r]!.length === 0) return r
+  return rows.length
+}
+
+/** The box table: the header row and the rows under it, up to the next blank. */
+function tableOf(sheet: Sheet): Cell[][] {
+  const start = sheet.rows.findIndex((row) => row[1] === 'Box')
+  return sheet.rows.slice(start, blankAfter(sheet.rows, start))
+}
+
+/** The rows of one drawing, by the label above it. */
+function drawingOf(sheet: Sheet, label: string): Cell[][] {
+  const start = sheet.rows.findIndex((row) => String(row[0] ?? '').startsWith(label))
+  expect(start, `no drawing labelled ${label}`).toBeGreaterThan(0)
+  return sheet.rows.slice(start + 1, blankAfter(sheet.rows, start + 1))
+}
 
 describe('formatTimestamp', () => {
   it('is local time to the minute', () => {
@@ -34,137 +54,147 @@ describe('buildReport', () => {
     expect(buildReport(stateOf(draft))).toBeNull()
   })
 
-  it('summarizes the example order, which needs more than one container', () => {
+  it('writes one sheet per container and nothing else', () => {
+    const state = stateOf(exampleDraft())
+    const result = state.derived.result!
+    expect(result.containers.length).toBeGreaterThan(1)
+    const workbook = buildReport(state, now)!
+    expect(workbook.sheets.map((s) => s.name)).toEqual(
+      result.containers.map((_, i) => `Container ${i + 1}`),
+    )
+  })
+
+  it('opens each sheet with the settings and totals of that container', () => {
     const state = stateOf(exampleDraft())
     const result = state.derived.result!
     const workbook = buildReport(state, now)!
-    expect(workbook.sheets.map((s) => s.name)).toEqual([
-      'Summary',
-      'Containers',
-      'Boxes',
-      'Placements',
-    ])
-    const [summary, containers, boxes, placements] = workbook.sheets
-    expect(summary!.header).toEqual(['Item', 'Value'])
-    expect(summaryOf(summary!.rows)).toMatchObject({
-      Exported: '2026-09-02 14:05',
-      Status: `${result.containers.length} containers`,
-      Details: expect.stringContaining('All 140 boxes placed in'),
-      Unit: 'in',
-      'Container type': '20 ft',
-      'Container length (in)': 232.2,
-      'Container width (in)': 92.6,
-      'Container height (in)': 94.2,
-      'Weight unit': 'kg',
-      'Payload per container': 11000,
-      // The placeholder catalog gives every cabinet a weight.
-      'Weight loaded': 5026,
-      'Containers needed': result.containers.length,
-      'Boxes requested': 140,
-      'Boxes placed': 140,
-      'Boxes left out': 0,
-      'Fill, all containers': { percent: result.stats.fill },
-      'Placements sheet': expect.stringContaining('Lengths are in inches.'),
+    workbook.sheets.forEach((sheet, i) => {
+      expect(settingsOf(sheet)).toMatchObject({
+        [`Container ${i + 1} of ${result.containers.length}`]: '2026-09-02 14:05',
+        'Container type': '20 ft',
+        'Container size (in)': '232.2 × 92.6 × 94.2',
+        Unit: 'in',
+        'Weight unit': 'kg',
+        'Payload per container': 11000,
+        'Loading mode': 'Even',
+        Boxes: result.containers[i]!.placements.length,
+        Fill: { percent: result.containers[i]!.stats.fill },
+      })
     })
-    expect(containers!.header).toEqual([
-      'Container',
-      'Boxes',
-      'Fill',
-      'Placed volume (cu ft)',
-      'Weight (kg)',
-      'Share of payload',
-    ])
-    expect(containers!.rows).toHaveLength(result.containers.length)
-    expect(containers!.rows[0]!.slice(0, 3)).toEqual([
-      1,
-      result.containers[0]!.placements.length,
-      { percent: result.containers[0]!.stats.fill },
-    ])
-    expect(boxes!.header.slice(0, 6)).toEqual([
-      '#',
-      'Box',
-      'Color',
-      'Length (in)',
-      'Width (in)',
-      'Height (in)',
-    ])
-    expect(placements!.header).toEqual([
-      'Container',
-      '#',
-      'Box',
-      'X (in)',
-      'Y (in)',
-      'Z (in)',
-      'Length (in)',
-      'Width (in)',
-      'Height (in)',
-      'Top (in)',
-    ])
   })
 
-  it('lists every box type with requested, placed and left-out counts', () => {
-    const state = stateOf(exampleDraft())
-    const boxes = buildReport(state, now)!.sheets[2]!.rows
-    expect(boxes).toHaveLength(5)
-    // An 18 in base cabinet: 18 x 24 x 34.5 in = 14,904 cu in = 8.625 cu ft, shown to two decimals.
-    expect(boxes[0]!.slice(0, 9)).toEqual([1, '18', '#f59e0b', 18, 24, 34.5, 28, 28, 0])
-    expect(boxes[0]![9]).toBe(8.63)
-    const sum = (column: number) => boxes.reduce((n, row) => n + (row[column] as number), 0)
-    expect(sum(6)).toBe(140)
-    expect(sum(7)).toBe(140)
-    expect(sum(8)).toBe(0)
-    const shares = boxes.map((row) => (row[11] as { percent: number }).percent)
-    expect(shares.reduce((a, b) => a + b)).toBeCloseTo(state.derived.result!.stats.fill, 6)
-  })
-
-  it('lists every placement with its container, inside the container', () => {
+  it('lists the boxes in that container, and only those', () => {
     const state = stateOf(exampleDraft())
     const result = state.derived.result!
-    const placements = buildReport(state, now)!.sheets[3]!.rows
-    expect(placements).toHaveLength(140)
-    expect(placements[0]!.slice(0, 5)).toEqual([1, 1, 'P249624', 0, 0])
-    const perContainer = result.containers.map((c) => c.placements.length)
-    placements.forEach((row, i) => {
-      const [container, n, , x, y, z, dx, dy, dz, top] = row as number[]
-      const k = container! - 1
-      expect(n).toBe(i + 1 - perContainer.slice(0, k).reduce((a, b) => a + b, 0))
-      expect(top).toBe(z! + dz!)
-      expect(x! + dx!).toBeLessThanOrEqual(232.2)
-      expect(y! + dy!).toBeLessThanOrEqual(92.6)
-      expect(z! + dz!).toBeLessThanOrEqual(94.2)
+    const workbook = buildReport(state, now)!
+    let total = 0
+    workbook.sheets.forEach((sheet, i) => {
+      const [header, ...rows] = tableOf(sheet)
+      expect(header).toEqual([
+        null,
+        'Box',
+        'Size (in)',
+        'Weight each (kg)',
+        'Weight (kg)',
+        'Fragile',
+        'Count',
+      ])
+      const placements = result.containers[i]!.placements
+      const nameOf = (typeId: string) =>
+        state.derived.scenario!.types.find((t) => t.id === typeId)!.name
+      for (const row of rows) {
+        const count = placements.filter((p) => nameOf(p.typeId) === row[1]).length
+        expect(row[6]).toBe(count)
+        expect(count).toBeGreaterThan(0)
+        // The swatch matches the colour the viewer and the legend use.
+        expect((row[0] as Block).fill).toMatch(/^#[0-9a-f]{6}$/)
+        total += count
+      }
+      expect(rows.reduce((n, row) => n + (row[6] as number), 0)).toBe(placements.length)
     })
+    expect(total).toBe(140)
   })
 
-  it('reports in the chosen unit', () => {
-    const draft = edits.setUnit(exampleDraft(), 'cm')
-    const workbook = buildReport(stateOf(draft), now)!
-    const summary = summaryOf(workbook.sheets[0]!.rows)
-    expect(summary).toMatchObject({
+  it('draws a top view and a side view of every container', () => {
+    const state = stateOf(exampleDraft())
+    const workbook = buildReport(state, now)!
+    for (const sheet of workbook.sheets) {
+      const top = drawingOf(sheet, 'Top view - length 232.2 × width 92.6 in')
+      const side = drawingOf(sheet, 'Side view - length 232.2 × height 94.2 in')
+      // 232.2 x 92.6 in across 80 columns: 80 x 32 cells, and 80 x 32 for the
+      // side view because the container is nearly as tall as it is wide.
+      expect(top).toHaveLength(32)
+      expect(side).toHaveLength(32)
+      for (const row of [...top, ...side]) {
+        // Seven table columns are left empty so the drawing starts clear of them.
+        expect(row).toHaveLength(87)
+        expect(row.slice(0, 7)).toEqual(Array(7).fill(null))
+        for (const cell of row.slice(7)) expect((cell as Block).fill).toMatch(/^#[0-9a-f]{6}$/)
+      }
+      // A drawing cell is a pixel: narrow columns and short rows.
+      expect(sheet.width).toBeLessThan(2)
+      expect(Object.keys(sheet.heights!)).toHaveLength(64)
+    }
+  })
+
+  it('paints what is packed and leaves the rest as floor', () => {
+    const state = stateOf(exampleDraft())
+    const workbook = buildReport(state, now)!
+    const sheet = workbook.sheets[0]!
+    const colours = new Set(
+      drawingOf(sheet, 'Top view').flatMap((row) =>
+        row.slice(7).map((cell) => (cell as Block).fill),
+      ),
+    )
+    const used = new Set(
+      tableOf(sheet)
+        .slice(1)
+        .map((row) => (row[0] as Block).fill),
+    )
+    for (const colour of used) expect(colours).toContain(colour)
+    // Everything drawn is either a box in the table or the empty floor.
+    for (const colour of colours) expect(used.has(colour) || colour === '#e2e8f0').toBe(true)
+  })
+
+  it('reports in the chosen units', () => {
+    const draft = edits.setWeightUnit(edits.setUnit(exampleDraft(), 'cm'), 'lb')
+    const sheet = buildReport(stateOf(draft), now)!.sheets[0]!
+    expect(settingsOf(sheet)).toMatchObject({
       Unit: 'cm',
-      'Container length (cm)': 589.8,
-      // 589.8 x 235.2 x 239.3 cm = 33,195,926 cu cm = 33.196 cu m.
-      'Container volume, each (m³)': 33.196,
-      'Placements sheet': expect.stringContaining('Lengths are in centimetres.'),
+      'Weight unit': 'lb',
+      'Container size (cm)': '589.8 × 235.2 × 239.3',
+      'Payload per container': 24251,
     })
-    expect(workbook.sheets[2]!.header[3]).toBe('Length (cm)')
-    expect(workbook.sheets[2]!.header[9]).toBe('Volume each (m³)')
-    expect(workbook.sheets[3]!.header[3]).toBe('X (cm)')
+    expect(tableOf(sheet)[0]).toContain('Size (cm)')
+    expect(tableOf(sheet)[0]).toContain('Weight each (lb)')
+    expect(settingsOf(sheet)['Volume (m³)']).toBeGreaterThan(0)
+  })
+
+  it('marks the fragile box types', () => {
+    const draft = edits.setFragile(exampleDraft(), '3036', true)
+    const sheet = buildReport(stateOf(draft), now)!.sheets[0]!
+    const rows = tableOf(sheet).slice(1)
+    expect(rows.find((row) => row[1] === '3036')![5]).toBe('Yes')
+    expect(rows.filter((row) => row[5] === 'Yes')).toHaveLength(1)
   })
 
   it('reports the optimized packing once it is in', () => {
     const state = stateOf(exampleDraft())
     const scenario = state.derived.scenario!
-    const optimized = packMany(scenario.container, scenario.types, {
-      optimizeRuns: 400,
-    })
+    const optimized = packMany(scenario.container, scenario.types, { optimizeRuns: 400 })
     const workbook = buildReport(
       { ...state, optimize: { ...DEFAULT_OPTIMIZE, status: 'done', result: optimized } },
       now,
     )!
-    expect(summaryOf(workbook.sheets[0]!.rows)['Containers needed']).toBe(
-      optimized.containers.length,
+    expect(workbook.sheets).toHaveLength(optimized.containers.length)
+    const boxes = workbook.sheets.reduce(
+      (n, sheet) =>
+        n +
+        tableOf(sheet)
+          .slice(1)
+          .reduce((m, row) => m + (row[6] as number), 0),
+      0,
     )
-    expect(workbook.sheets[1]!.rows).toHaveLength(optimized.containers.length)
-    expect(workbook.sheets[3]!.rows).toHaveLength(140)
+    expect(boxes).toBe(optimized.stats.placed)
   })
 })

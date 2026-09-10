@@ -18,7 +18,7 @@ Pick a standard shipping container (or type a custom interior size), add cabinet
 - Weight: each container has a payload (11,000 kg in a 20 ft box, 19,000 in a 40 ft high cube; a custom container takes any figure) and each cabinet can have a weight. A container is filled until it runs out of space **or** of payload, whichever comes first, so a heavy order needs more containers than the volume alone suggests. Weights come from the catalog, the import, or the box row.
 - Units: in, ft, cm, mm, m for sizes, kg or lb for weights. Every size is a real measurement, so switching a unit converts all of them. All packing math happens on exact integers.
 - **Import** an order from Excel or CSV: one row per cabinet with a code and a quantity, sizes only for boxes outside the catalog. contsim asks which unit the file's sizes are in, since a spreadsheet rarely says. The Excel export imports back too, container settings included. The scenario also persists in the browser.
-- **Export Excel** writes an .xlsx workbook with four sheets: a summary (status, container, totals), one row per container, one row per box type (requested, placed, left out, volumes), and one row per placed box (container, position, oriented size). Read and written by a small in-house reader and writer, no spreadsheet library.
+- **Export Excel** writes one sheet per container: the container and its totals, the boxes it carries with their count, and a top view and a side view drawn to scale as coloured cells, so a colleague without the app can see the load. Read and written by a small in-house reader and writer, no spreadsheet library.
 - No backend, no accounts, one runtime dependency (three.js).
 
 ## Honesty about the algorithm

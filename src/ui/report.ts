@@ -1,31 +1,30 @@
 /**
- * The Excel report: everything the screen shows about the current order and
- * its packing, as a workbook with four sheets.
+ * The Excel export: one sheet per container, each holding what that container
+ * carries and what it looks like.
  *
- * - Summary: status, container, totals, and how to read the other sheets.
- * - Containers: one row per container with its box count and fill.
- * - Boxes: one row per box type with requested, placed and left-out counts.
- * - Placements: one row per placed box with its container, position and size.
- *
- * The report describes the packing on screen, which is the optimizer's once
- * it has finished.
+ * The sheet opens with the settings and totals, then the boxes with their
+ * count, then a top view and a side view drawn as coloured cells
+ * (src/ui/plan.ts). Import reads the same sheets back, so the labels in the
+ * settings block and the box table are part of the format
+ * (src/ui/orderImport.ts).
  */
 
-import { summarizeStatus } from './describe'
+import type { Placement } from '../core'
+import { PLAN_COLUMNS, sideView, topView, type Plan } from './plan'
 import { containerTypeName } from './presets'
 import { shownResult, type AppState } from './state'
-import { fromGrams, fromInt, volumeOf, type Unit } from './units'
-import { percent, type Cell, type Sheet, type Workbook } from './xlsx'
+import { formatNumber, fromGrams, volumeOf } from './units'
+import { block, percent, type Cell, type Sheet, type Workbook } from './xlsx'
 
 export const EXCEL_FILENAME = 'contsim-packing.xlsx'
 
-const UNIT_NAMES: Record<Unit, string> = {
-  in: 'inches',
-  ft: 'feet',
-  cm: 'centimetres',
-  mm: 'millimetres',
-  m: 'metres',
-}
+/** The empty floor of a container, so its outline reads against the page. */
+const FLOOR = '#e2e8f0'
+/** Widths for the table, in characters; every column after them draws the plan. */
+const TABLE_WIDTHS = [3, 20, 20, 15, 14, 8, 8]
+/** Narrow enough that a cell reads as a pixel; the row height matches it. */
+const PLAN_CELL_WIDTH = 1.3
+const PLAN_ROW_HEIGHT = 6.75
 
 const pad = (n: number) => String(n).padStart(2, '0')
 
@@ -37,7 +36,7 @@ export function formatTimestamp(date: Date): string {
   )
 }
 
-/** Builds the workbook, or null while the inputs are invalid and there is no packing to report. */
+/** Builds the workbook, or null while the inputs are invalid. */
 export function buildReport(state: AppState, now: Date = new Date()): Workbook | null {
   const { draft, derived } = state
   const { scenario, scale } = derived
@@ -45,160 +44,107 @@ export function buildReport(state: AppState, now: Date = new Date()): Workbook |
   if (!result || !scenario) return null
 
   const unit = draft.unit
-  const length = (int: number) => fromInt(int, scale)
+  const weightUnit = draft.weightUnit
+  // The same rounding the app shows, so the sheet and the screen agree and a
+  // converted round number does not arrive as 24251.001.
+  const weight = (grams: number) => {
+    const value = fromGrams(grams, weightUnit)
+    return Number(value.toFixed(value < 100 ? 2 : 0))
+  }
   const volumeUnit = volumeOf(0, scale, unit).unit
   const volume = (int: number) => {
     const v = volumeOf(int, scale, unit)
     return Number(v.value.toFixed(v.decimals + 1))
   }
-  const lengthHeader = (label: string) => `${label} (${unit})`
-  const volumeHeader = (label: string) => `${label} (${volumeUnit})`
+  const size = (l: number, w: number, h: number) =>
+    `${formatNumber(l, scale)} × ${formatNumber(w, scale)} × ${formatNumber(h, scale)}`
 
-  const status = summarizeStatus(draft, derived, result)
-  const { requested, placed, containers: count, containerVolume, maxWeight } = result.stats
-  const weightUnit = draft.weightUnit
-  /** Grams to the display unit, as a number Excel can add up. */
-  const weight = (grams: number) => Number(fromGrams(grams, weightUnit).toFixed(3))
-  const weightHeader = (label: string) => `${label} (${weightUnit})`
-  const capacity = containerVolume * Math.max(count, 1)
-  const placedByType = new Map<string, number>()
-  const placedVolumeByType = new Map<string, number>()
-  for (const c of result.containers) {
-    for (const p of c.placements) {
-      placedByType.set(p.typeId, (placedByType.get(p.typeId) ?? 0) + 1)
-      placedVolumeByType.set(p.typeId, (placedVolumeByType.get(p.typeId) ?? 0) + p.dx * p.dy * p.dz)
-    }
-  }
+  const container = scenario.container
+  const types = new Map(scenario.types.map((t) => [t.id, t]))
+  const colourOf = (typeId: string) => types.get(typeId)?.color ?? '#888888'
+  const { maxWeight } = result.stats
 
-  const summary: Cell[][] = [
-    ['Exported', formatTimestamp(now)],
-    ['Status', status.label],
-    ['Details', [status.text, ...status.lines].join(' ')],
-    ['Unit', unit],
-    ['Container type', containerTypeName(draft.containerType)],
-    [lengthHeader('Container length'), length(scenario.container.l)],
-    [lengthHeader('Container width'), length(scenario.container.w)],
-    [lengthHeader('Container height'), length(scenario.container.h)],
-    [volumeHeader('Container volume, each'), volume(containerVolume)],
-    ['Loading mode', draft.mode === 'even' ? 'Even' : 'Optimize'],
-    ['Weight unit', weightUnit],
-    ['Payload per container', maxWeight > 0 ? weight(maxWeight) : 'not set'],
-    ['Weight loaded', weight(result.stats.weight)],
-    ['Containers needed', count],
-    ['Boxes requested', requested],
-    ['Boxes placed', placed],
-    ['Boxes left out', requested - placed],
-    ['Fill, all containers', percent(result.stats.fill)],
-    [volumeHeader('Placed volume'), volume(result.stats.placedVolume)],
-    [volumeHeader('Capacity, all containers'), volume(capacity)],
-    ['Packing time (ms)', Math.round(result.stats.ms)],
-    [
-      'Placements sheet',
-      `Each box is listed by its back-bottom-left corner, measured from the container's back-bottom-left corner: x along the length, y along the width, z up. Lengths are in ${UNIT_NAMES[unit]}.`,
-    ],
-  ]
-
-  const containers: Cell[][] = result.containers.map((c, i) => [
-    i + 1,
-    c.placements.length,
-    percent(c.stats.fill),
-    volume(c.stats.placedVolume),
-    weight(c.stats.weight),
-    maxWeight > 0 ? percent(c.stats.weight / maxWeight) : null,
-  ])
-
-  const boxes: Cell[][] = scenario.types.map((t, i) => {
-    const n = placedByType.get(t.id) ?? 0
-    const placedVolume = placedVolumeByType.get(t.id) ?? 0
-    return [
-      i + 1,
-      t.name,
-      t.color,
-      length(t.dims.l),
-      length(t.dims.w),
-      length(t.dims.h),
-      t.qty,
-      n,
-      t.qty - n,
-      volume(t.dims.l * t.dims.w * t.dims.h),
-      volume(placedVolume),
-      percent(capacity > 0 ? placedVolume / capacity : 0),
-      t.weight ? weight(t.weight) : null,
-      t.weight ? weight(t.weight * n) : null,
-      t.fragile ? 'Yes' : 'No',
+  const sheets: Sheet[] = result.containers.map((packing, i) => {
+    const rows: Cell[][] = [
+      [`Container ${i + 1} of ${result.containers.length}`, formatTimestamp(now)],
+      ['Container type', containerTypeName(draft.containerType)],
+      [`Container size (${unit})`, size(container.l, container.w, container.h)],
+      ['Unit', unit],
+      ['Weight unit', weightUnit],
+      ['Payload per container', maxWeight > 0 ? weight(maxWeight) : 'not set'],
+      ['Loading mode', draft.mode === 'even' ? 'Even' : 'Optimize'],
+      ['Boxes', packing.placements.length],
+      ['Fill', percent(packing.stats.fill)],
+      [`Volume (${volumeUnit})`, volume(packing.stats.placedVolume)],
+      [`Weight (${weightUnit})`, weight(packing.stats.weight)],
+      [],
+      [
+        null,
+        'Box',
+        `Size (${unit})`,
+        `Weight each (${weightUnit})`,
+        `Weight (${weightUnit})`,
+        'Fragile',
+        'Count',
+      ],
     ]
+    for (const t of scenario.types) {
+      const n = packing.placements.filter((p) => p.typeId === t.id).length
+      if (n === 0) continue
+      rows.push([
+        block(t.color),
+        t.name,
+        size(t.dims.l, t.dims.w, t.dims.h),
+        t.weight ? weight(t.weight) : null,
+        t.weight ? weight(t.weight * n) : null,
+        t.fragile ? 'Yes' : 'No',
+        n,
+      ])
+    }
+    rows.push([])
+
+    const heights: Record<number, number> = {}
+    const draw = (label: string, plan: Plan) => {
+      rows.push([label])
+      for (const line of plan.grid) {
+        heights[rows.length] = PLAN_ROW_HEIGHT
+        rows.push([
+          ...Array<Cell>(TABLE_WIDTHS.length).fill(null),
+          ...line.map((colour) => block(colour ?? FLOOR)),
+        ])
+      }
+      rows.push([])
+    }
+    const placements = packing.placements as readonly Placement[]
+    draw(
+      `Top view - length ${formatNumber(container.l, scale)} × width ${formatNumber(container.w, scale)} ${unit}`,
+      topView(container, placements, colourOf, PLAN_COLUMNS),
+    )
+    draw(
+      `Side view - length ${formatNumber(container.l, scale)} × height ${formatNumber(container.h, scale)} ${unit}`,
+      sideView(container, placements, colourOf, PLAN_COLUMNS),
+    )
+
+    return {
+      name: `Container ${i + 1}`,
+      rows,
+      widths: TABLE_WIDTHS,
+      width: PLAN_CELL_WIDTH,
+      heights,
+    }
   })
 
-  const names = new Map(scenario.types.map((t) => [t.id, t.name]))
-  const placements: Cell[][] = result.containers.flatMap((c, k) =>
-    c.placements.map((p, i) => [
-      k + 1,
-      i + 1,
-      names.get(p.typeId) ?? p.typeId,
-      length(p.x),
-      length(p.y),
-      length(p.z),
-      length(p.dx),
-      length(p.dy),
-      length(p.dz),
-      length(p.z + p.dz),
-    ]),
-  )
+  return { sheets: sheets.length > 0 ? sheets : [emptySheet(now)] }
+}
 
-  const sheets: Sheet[] = [
-    { name: 'Summary', header: ['Item', 'Value'], rows: summary, widths: [30, 70] },
-    {
-      name: 'Containers',
-      header: [
-        'Container',
-        'Boxes',
-        'Fill',
-        volumeHeader('Placed volume'),
-        weightHeader('Weight'),
-        'Share of payload',
-      ],
-      rows: containers,
-      widths: [11, 9, 9, 22, 14, 17],
-    },
-    {
-      name: 'Boxes',
-      header: [
-        '#',
-        'Box',
-        'Color',
-        lengthHeader('Length'),
-        lengthHeader('Width'),
-        lengthHeader('Height'),
-        'Requested',
-        'Placed',
-        'Left out',
-        volumeHeader('Volume each'),
-        volumeHeader('Placed volume'),
-        'Share of capacity',
-        weightHeader('Weight each'),
-        weightHeader('Total weight'),
-        'Fragile',
-      ],
-      rows: boxes,
-      widths: [5, 22, 10, 12, 12, 12, 11, 9, 10, 20, 22, 18, 15, 16, 9],
-    },
-    {
-      name: 'Placements',
-      header: [
-        'Container',
-        '#',
-        'Box',
-        lengthHeader('X'),
-        lengthHeader('Y'),
-        lengthHeader('Z'),
-        lengthHeader('Length'),
-        lengthHeader('Width'),
-        lengthHeader('Height'),
-        lengthHeader('Top'),
-      ],
-      rows: placements,
-      widths: [11, 6, 22, 9, 9, 9, 12, 12, 12, 9],
-    },
-  ]
-  return { sheets }
+/** Nothing is packed, but a workbook needs a sheet. */
+function emptySheet(now: Date): Sheet {
+  return {
+    name: 'Container 1',
+    rows: [
+      ['contsim packing', formatTimestamp(now)],
+      ['Boxes', 0],
+    ],
+    widths: TABLE_WIDTHS,
+  }
 }

@@ -1,9 +1,9 @@
 /**
- * Minimal .xlsx writer (ECMA-376 SpreadsheetML): a workbook of sheets, each a
- * bold header row followed by rows of strings, numbers, booleans or
- * percentages. Strings are written inline, so no shared-string table is
- * needed. The format subset used here has been stable since 2006 and is read
- * by Excel, LibreOffice, Numbers and Google Sheets.
+ * Minimal .xlsx writer (ECMA-376 SpreadsheetML): a workbook of sheets of
+ * strings, numbers, booleans, percentages and coloured blocks, with an
+ * optional bold header row. Strings are written inline, so no shared-string
+ * table is needed. The format subset used here has been stable since 2006 and
+ * is read by Excel, LibreOffice, Numbers and Google Sheets.
  */
 
 import { zip, type Bytes, type ZipEntry, type ZipOptions } from './zip'
@@ -13,14 +13,28 @@ export interface Percent {
   percent: number
 }
 
-export type Cell = string | number | boolean | Percent | null | undefined
+/** A cell painted a solid colour: the pixels a drawing is made of. */
+export interface Block {
+  /** "#rrggbb". */
+  fill: string
+  value?: string | number
+}
+
+export type Cell = string | number | boolean | Percent | Block | null | undefined
+
+export const block = (fill: string, value?: string | number): Block => ({ fill, value })
 
 export interface Sheet {
   name: string
-  header: string[]
+  /** Bold and frozen. Omit for a sheet that is not a table. */
+  header?: string[]
   rows: Cell[][]
-  /** Column widths in characters, by column index. Missing entries use the default. */
+  /** Column widths in characters, by column index. Missing entries use `width`. */
   widths?: number[]
+  /** Width for every column the list above does not name. */
+  width?: number
+  /** Row heights in points, by row index counting any header. */
+  heights?: Record<number, number>
 }
 
 export interface Workbook {
@@ -31,9 +45,19 @@ export const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsh
 
 export const percent = (value: number): Percent => ({ percent: value })
 
-// Indexes into cellXfs in styles.xml below.
+// Indexes into cellXfs in styles.xml below; colours follow after these.
 const STYLE_HEADER = 1
 const STYLE_PERCENT = 2
+const STYLE_COUNT = 3
+
+const isBlock = (cell: Cell): cell is Block =>
+  typeof cell === 'object' && cell !== null && 'fill' in cell
+
+/** "#f59e0b" as Excel's "FFF59E0B"; anything unreadable comes out white. */
+function argb(fill: string): string {
+  const hex = /^#?([0-9a-f]{6})$/i.exec(fill.trim())
+  return `FF${(hex?.[1] ?? 'ffffff').toUpperCase()}`
+}
 
 const XML_HEADER = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
 const NS_MAIN = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
@@ -80,7 +104,15 @@ export function sheetName(name: string, taken: ReadonlySet<string>): string {
   return candidate
 }
 
-function cellXml(ref: string, cell: Cell, style = 0): string {
+function cellXml(ref: string, cell: Cell, style = 0, fills?: Map<string, number>): string {
+  if (isBlock(cell)) {
+    const painted = fills?.get(argb(cell.fill)) ?? 0
+    const value = cell.value
+    if (value === undefined) return `<c r="${ref}" s="${painted}"/>`
+    return typeof value === 'number'
+      ? `<c r="${ref}" s="${painted}"><v>${value}</v></c>`
+      : `<c r="${ref}" t="inlineStr" s="${painted}"><is><t>${escapeXml(value)}</t></is></c>`
+  }
   const s = style ? ` s="${style}"` : ''
   if (cell === null || cell === undefined) return ''
   if (typeof cell === 'string') {
@@ -96,26 +128,48 @@ function cellXml(ref: string, cell: Cell, style = 0): string {
     : ''
 }
 
-function rowXml(index: number, cells: Cell[], style = 0): string {
-  const body = cells.map((cell, i) => cellXml(`${columnLabel(i)}${index}`, cell, style)).join('')
-  return `<row r="${index}">${body}</row>`
+function rowXml(
+  index: number,
+  cells: Cell[],
+  style = 0,
+  fills?: Map<string, number>,
+  height?: number,
+): string {
+  const body = cells
+    .map((cell, i) => cellXml(`${columnLabel(i)}${index}`, cell, style, fills))
+    .join('')
+  const ht = height === undefined ? '' : ` ht="${height}" customHeight="1"`
+  return `<row r="${index}"${ht}>${body}</row>`
 }
 
-export function sheetXml(sheet: Sheet, selected: boolean): string {
-  const columns = Math.max(sheet.header.length, ...sheet.rows.map((r) => r.length), 1)
-  const rows = [rowXml(1, sheet.header, STYLE_HEADER)]
-  sheet.rows.forEach((cells, i) => rows.push(rowXml(i + 2, cells)))
-  const cols = (sheet.widths ?? [])
+export function sheetXml(sheet: Sheet, selected: boolean, fills?: Map<string, number>): string {
+  const columns = Math.max(sheet.header?.length ?? 0, ...sheet.rows.map((r) => r.length), 1)
+  const heights = sheet.heights ?? {}
+  const rows: string[] = []
+  let at = 0
+  if (sheet.header) rows.push(rowXml(++at, sheet.header, STYLE_HEADER, fills, heights[0]))
+  for (const cells of sheet.rows) {
+    const index = at++
+    rows.push(rowXml(at, cells, 0, fills, heights[index]))
+  }
+  const named = (sheet.widths ?? [])
     .map((width, i) =>
       width ? `<col min="${i + 1}" max="${i + 1}" width="${width}" customWidth="1"/>` : '',
     )
     .join('')
+  const rest =
+    sheet.width === undefined
+      ? ''
+      : `<col min="${(sheet.widths?.length ?? 0) + 1}" max="16384" width="${sheet.width}" customWidth="1"/>`
+  const cols = named + rest
   return (
     XML_HEADER +
     `<worksheet xmlns="${NS_MAIN}">` +
-    `<dimension ref="A1:${columnLabel(columns - 1)}${rows.length}"/>` +
+    `<dimension ref="A1:${columnLabel(columns - 1)}${Math.max(rows.length, 1)}"/>` +
     `<sheetViews><sheetView workbookViewId="0"${selected ? ' tabSelected="1"' : ''}>` +
-    '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>' +
+    (sheet.header
+      ? '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>'
+      : '') +
     '</sheetView></sheetViews>' +
     (cols ? `<cols>${cols}</cols>` : '') +
     `<sheetData>${rows.join('')}</sheetData>` +
@@ -123,30 +177,65 @@ export function sheetXml(sheet: Sheet, selected: boolean): string {
   )
 }
 
-const STYLES_XML =
-  XML_HEADER +
-  `<styleSheet xmlns="${NS_MAIN}">` +
-  '<numFmts count="1"><numFmt numFmtId="164" formatCode="0.0%"/></numFmts>' +
-  '<fonts count="2">' +
-  '<font><sz val="11"/><name val="Calibri"/></font>' +
-  '<font><b/><sz val="11"/><name val="Calibri"/></font>' +
-  '</fonts>' +
-  '<fills count="2">' +
-  '<fill><patternFill patternType="none"/></fill>' +
-  '<fill><patternFill patternType="gray125"/></fill>' +
-  '</fills>' +
-  '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
-  '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
-  '<cellXfs count="3">' +
-  '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
-  '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>' +
-  '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>' +
-  '</cellXfs>' +
-  '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
-  '</styleSheet>'
+/** One fill and one format per colour, after the three the tables use. */
+function stylesXml(colours: readonly string[]): string {
+  const fills = colours
+    .map(
+      (rgb) =>
+        `<fill><patternFill patternType="solid"><fgColor rgb="${rgb}"/><bgColor indexed="64"/></patternFill></fill>`,
+    )
+    .join('')
+  const painted = colours
+    .map(
+      (_, i) =>
+        `<xf numFmtId="0" fontId="0" fillId="${i + 2}" borderId="0" xfId="0" applyFill="1"/>`,
+    )
+    .join('')
+  return (
+    XML_HEADER +
+    `<styleSheet xmlns="${NS_MAIN}">` +
+    '<numFmts count="1"><numFmt numFmtId="164" formatCode="0.0%"/></numFmts>' +
+    '<fonts count="2">' +
+    '<font><sz val="11"/><name val="Calibri"/></font>' +
+    '<font><b/><sz val="11"/><name val="Calibri"/></font>' +
+    '</fonts>' +
+    `<fills count="${colours.length + 2}">` +
+    '<fill><patternFill patternType="none"/></fill>' +
+    '<fill><patternFill patternType="gray125"/></fill>' +
+    fills +
+    '</fills>' +
+    '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
+    '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+    `<cellXfs count="${STYLE_COUNT + colours.length}">` +
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+    '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>' +
+    '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>' +
+    painted +
+    '</cellXfs>' +
+    '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
+    '</styleSheet>'
+  )
+}
+
+/** Every colour the workbook paints with, as Excel ARGB, in the order it meets them. */
+export function paintedColours(workbook: Workbook): string[] {
+  const seen: string[] = []
+  for (const sheet of workbook.sheets) {
+    for (const row of sheet.rows) {
+      for (const cell of row) {
+        if (!isBlock(cell)) continue
+        const rgb = argb(cell.fill)
+        if (!seen.includes(rgb)) seen.push(rgb)
+      }
+    }
+  }
+  return seen
+}
 
 /** The parts of the package, ready to be zipped. Pure and synchronous, so easy to test. */
 export function workbookParts(workbook: Workbook): ZipEntry[] {
+  const colours = paintedColours(workbook)
+  const fills = new Map(colours.map((rgb, i) => [rgb, STYLE_COUNT + i]))
   const taken = new Set<string>()
   const names = workbook.sheets.map((sheet) => {
     const name = sheetName(sheet.name, taken)
@@ -203,10 +292,10 @@ export function workbookParts(workbook: Workbook): ZipEntry[] {
     { name: '_rels/.rels', data: rootRels },
     { name: 'xl/workbook.xml', data: workbookXml },
     { name: 'xl/_rels/workbook.xml.rels', data: workbookRels },
-    { name: 'xl/styles.xml', data: STYLES_XML },
+    { name: 'xl/styles.xml', data: stylesXml(colours) },
     ...workbook.sheets.map((sheet, i) => ({
       name: `xl/${sheetFile(i)}`,
-      data: sheetXml(sheet, i === 0),
+      data: sheetXml(sheet, i === 0, fills),
     })),
   ]
 }

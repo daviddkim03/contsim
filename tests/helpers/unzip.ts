@@ -63,7 +63,8 @@ export function unzip(bytes: Uint8Array): Map<string, Entry> {
 
 export const text = (entry: Entry): string => new TextDecoder().decode(entry.data)
 
-export type Value = string | number | boolean
+/** A cell's value; undefined where a cell is painted but empty, or absent. */
+export type Value = string | number | boolean | undefined
 
 const unescapeXml = (s: string) =>
   s
@@ -81,12 +82,15 @@ function columnIndex(label: string): number {
 /** Cell values of a worksheet, by row then column. Skipped cells leave holes. */
 export function readSheet(xml: string): Value[][] {
   const rows: Value[][] = []
-  for (const row of xml.matchAll(/<row r="\d+">(.*?)<\/row>/g)) {
+  for (const row of xml.matchAll(/<row r="\d+"[^>]*>(.*?)<\/row>/g)) {
     const cells: Value[] = []
-    for (const cell of row[1]!.matchAll(/<c r="([A-Z]+)\d+"([^>]*)>(.*?)<\/c>/g)) {
+    // A cell is either <c ...>...</c> or, when it carries only a style, <c .../>.
+    for (const cell of row[1]!.matchAll(/<c r="([A-Z]+)\d+"([^>/]*)(?:\/>|>(.*?)<\/c>)/g)) {
       const [, column, attrs, inner] = cell
       const index = columnIndex(column!)
-      if (attrs!.includes('t="inlineStr"')) {
+      if (inner === undefined) {
+        cells[index] = undefined
+      } else if (attrs!.includes('t="inlineStr"')) {
         cells[index] = unescapeXml(/<t[^>]*>(.*?)<\/t>/.exec(inner!)?.[1] ?? '')
       } else if (attrs!.includes('t="b"')) {
         cells[index] = /<v>1<\/v>/.test(inner!)

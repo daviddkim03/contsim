@@ -24,7 +24,7 @@ Added on 2026-09-03: container presets and a cabinet catalog with a searchable p
 
 Added on 2026-09-08: the import asks which unit the file's sizes are in and switching units converts every size (sections 2 and 5.7); a custom box can be saved into the catalog and taken back out (section 5.5); the shipped catalog is five placeholders instead of the 174 sample rows, since the real one is loaded from a spreadsheet or built up in the app. Then the 3D view was made to scale to a thousand boxes in a container (section 5.8).
 
-Added on 2026-09-10: fragility per box type in place of the global "keep upright" toggle (section 4.5), and a sidebar without Load example, Order template or the standing hint line.
+Added on 2026-09-10: fragility per box type in place of the global "keep upright" toggle (section 4.5), a sidebar without Load example, Order template or the standing hint line, and an Excel export rebuilt around one sheet per container with a top and a side view of the load (section 5.4).
 
 Added on 2026-09-09: two loading modes, Even (the default, spreading the boxes so every container holds close to the same number) and Optimize (the previous behaviour), in sections 4.4 and 5.6; editable per-container counts in the legend (section 5.6); and weight, with a payload per container type and a weight per box (section 5.9).
 
@@ -136,8 +136,9 @@ export type Ordering =
   | { shuffle: number } // seeded
 
 export interface PackOptions {
-  keepUpright: boolean // default false
   order: Ordering // default 'volume-desc'
+  maxWeight?: number // 0 or missing means no limit
+  skipChecks?: boolean // the optimizer packs even a provably impossible order
 }
 
 export type Objective = 'keep-most-boxes' | 'keep-most-volume' | 'cut-evenly'
@@ -157,9 +158,9 @@ export interface OptimizeResult {
 
 Run before packing. They are O(number of types) and give a definitive "Impossible" with a human-readable reason:
 
-1. Oversize box. No allowed orientation of the box fits inside the container (`orientations` + `insideContainer`). With keepUpright only the two upright orientations count.
+1. Oversize box. No allowed orientation of the box fits inside the container (`orientations` + `insideContainer`). For a fragile type only the two upright orientations count.
 2. Volume. sum(qty_i * l_i * w_i * h_i) > L * W * H.
-3. Per-type upper bound (lattice bound). Let s be the smallest side of the box (with keepUpright: min(l, w) horizontally and h vertically). No more than floor(L/s) * floor(W/s) * floor(H/s) boxes of that type can be inside the container at once, whatever else is packed with them: every placed box has an extent of at least s along each axis, so it contains a point of the lattice (i*s - 1, j*s - 1, k*s - 1), and two non-overlapping boxes cannot share a lattice point. If qty_i exceeds the bound the scenario is impossible. Do not use the best single-orientation grid count here: it is a lower bound on capacity, not an upper bound (four 3x2x1 boxes fit in 5x5x1 as a pinwheel while every grid holds only two).
+3. Per-type upper bound (lattice bound). Let s be the smallest side of the box (for a fragile type: min(l, w) horizontally and h vertically). No more than floor(L/s) * floor(W/s) * floor(H/s) boxes of that type can be inside the container at once, whatever else is packed with them: every placed box has an extent of at least s along each axis, so it contains a point of the lattice (i*s - 1, j*s - 1, k*s - 1), and two non-overlapping boxes cannot share a lattice point. If qty_i exceeds the bound the scenario is impossible. Do not use the best single-orientation grid count here: it is a lower bound on capacity, not an upper bound (four 3x2x1 boxes fit in 5x5x1 as a pinwheel while every grid holds only two).
 
 If none fire, run the packer. Passing these checks proves nothing; only the packer can prove `fits`. The result is structured (`Impossibility`), and `describeImpossibility(imp, types, fmt)` turns it into a sentence; the UI passes formatters that undo the integer scaling.
 
@@ -181,7 +182,7 @@ pack(container, types, opts):
     sort eps by (z, y, x)                  // lowest first, then back, then left
     hit = null
     for ep in eps:
-      for d in orientations(item.dims, opts.keepUpright):   // deduped: cube 1, two equal sides 3, else 6
+      for d in orientations(item.dims, item.fragile):   // deduped: cube 1, two equal sides 3, else 6
         if insideContainer(ep, d) and not overlapsAny(ep, d, placed):
           hit = (ep, d); break
       if hit: break
@@ -320,22 +321,19 @@ The takeoff-tool screenshot is the layout and style reference: dark left sidebar
 |  L [    ] W [    ]|                                                |  # Box A 10/10|
 |  H [    ]         |                                                |  # Box B  7/10|
 |                   |                                                |  # Box C  4/4 |
-| BOXES       + Add |             3D view (orbit / zoom)             |               |
+| BOXES  Import Clear + Add |       3D view (orbit / zoom)           |               |
 |  Box A  l w h qty |                                                |  STATUS       |
-|  Box B  l w h qty |                                                |  Doesn't fit  |
-|  Box C  l w h qty |                                                |  21/24 placed |
-|                   |                                                |  Fill 71 %    |
-| [ ] Keep upright  |  +------------------------------+              |  12 ms        |
-|                   |  | Optimize result              |              |               |
-| [   Optimize    ] |  | Box B 10 -> 7, Box C 4 -> 3  |              |               |
-| results update    |  | [Apply]  [Discard]           |              |               |
-|   as you type     |  +------------------------------+              |               |
+|  [ ] Fragile  kg  |                                                |  2 containers |
+|  Box B  l w h qty |                                                |  140/140      |
+|  [x] Fragile  kg  |                                                |  Fill 71 %    |
+|                   |                                                |  12 ms        |
+| [  Export Excel ] |                                                |               |
 +-------------------+------------------------------------------------+---------------+
 ```
 
 ### 5.2 Behaviour
 
-- Every edit (container dims, box dims, qty, upright toggle) re-runs the checks and the packer, debounced ~150 ms. There is no "Check" button; the status is always current. The unit selector sits next to the container dims in the sidebar rather than above the canvas.
+- Every edit (container dims, box dims, qty, fragility, weight) re-runs the checks and the packer, debounced ~150 ms. There is no "Check" button; the status is always current. The unit selector sits next to the container dims in the sidebar rather than above the canvas.
 - Qty has - / + steppers and accepts typing; arrow keys step. Minimum 0. A type with qty 0 stays in the list, greyed out.
 - Clear, beside Import and + Add box, empties the box list after one confirmation; the container, units and settings stay for the next order. It is the only way out of a long list, since rows are otherwise removed one at a time.
 - Status badge:
@@ -346,7 +344,7 @@ The takeoff-tool screenshot is the layout and style reference: dark left sidebar
 - 3D view: container as a wireframe over a light floor, boxes as solid colored cuboids with dark edges, one stable color per type. Hovering a legend row or a sidebar row highlights that type (everything else fades). The layer slider hides every box whose bottom is above the chosen height so the user can look inside. The camera follows the container until the user first orbits; after that it only moves on Reset view or when the container dims change. A 3D / Table toggle swaps the center panel for the placement list. Rendering is on demand, not a loop. Without WebGL the app falls back to the table.
 - Unplaced boxes: shown in the legend as "7/10" and listed under the status.
 - Optimize: automatic, see 5.6. (Until 2026-09-03 this was a button with three objectives and an Apply / Discard popover proposing quantity reductions; with overflow going to another container, reductions no longer make sense.)
-- Persistence: the current scenario is saved to localStorage on every change. Export Excel downloads `contsim-packing.xlsx` (section 5.4) and Import reads it back, or reads an order sheet (section 5.7). "Load example" restores the sample scenario after a confirmation. (JSON import and export existed until 2026-09-03.)
+- Persistence: the current scenario is saved to localStorage on every change. Export Excel downloads `contsim-packing.xlsx` (section 5.4) and Import reads it back, or reads an order sheet (section 5.7). (JSON import and export existed until 2026-09-03.)
 - Validation: non-numeric, zero, negative, or absurdly large dims mark the field invalid; the packer does not run; status shows "Fix inputs". Never crash on bad input.
 
 ### 5.3 Style
@@ -355,11 +353,15 @@ Dark sidebar, light canvas background, amber primary button, muted secondary but
 
 ### 5.4 Excel export
 
-Export Excel writes what the screen shows, so a colleague without the app gets the whole picture. Three sheets, all numbers in the display unit and volumes in cu ft or m³:
+Export Excel writes what the screen shows, so a colleague without the app gets the whole picture. One sheet per container, named "Container 1", "Container 2" and so on, and nothing else: what a person does with this file is load one container, so everything about that container is on its own page and no page needs another. All numbers are in the display unit, volumes in cu ft or m³.
 
-- Summary: exported at, status and details (the same wording as the badge), unit, container dims and volume, keep upright, boxes requested / placed / left out, fill, placed volume, packing time, and a note explaining the placement coordinates. While an Optimize proposal is on screen the status is "Optimize proposal" and the optimizer's runs and time are listed.
-- Boxes: one row per type: name, color, dims, requested, placed, left out, volume each, placed volume, share of the container.
-- Placements: one row per placed box in placement order: box, x, y, z (min corner), oriented length, width, height, and top (z + height).
+Each sheet holds, in order:
+
+- The settings and the totals for that container: "Container N of M" with the export time, container type, size, unit, weight unit, payload per container, loading mode, then boxes, fill, placed volume and weight.
+- The boxes in that container: a colour swatch matching the 3D view and the legend, name, size, weight each, weight, fragile, and the count in this container. Counts across the sheets add up to the order.
+- A top view and a side view of the load, drawn to scale (`src/ui/plan.ts`). Each is a grid of cells 80 wide, coloured per box type against a light floor, in columns narrow enough and rows short enough to read as pixels. The top view paints the lowest box first, so what shows is what is on top; the side view paints from the back forward and measures height from the roof down, so row 0 is the ceiling. A box thinner than a cell still gets one cell rather than disappearing.
+
+There is deliberately no overview sheet, no per-placement coordinate dump and no separate box catalog: they were in the first version and nobody loading a container needs them.
 
 The writer is in-house (`src/ui/xlsx.ts` + `src/ui/zip.ts`, about 300 lines): SpreadsheetML with inline strings, a bold frozen header row, column widths, and a percent number format, packaged in a ZIP that deflates through the browser's CompressionStream (stored when unavailable). The available libraries were rejected on purpose: SheetJS on npm is stale with open advisories, and ExcelJS is larger than three.js. The subset of the format used here has not changed since 2006. Tests read the file back with an independent ZIP reader that checks every CRC with Node's zlib, and the e2e test downloads a real file from the production build.
 
@@ -375,14 +377,14 @@ The star on a custom row saves it into the catalog under its name (converted to 
 
 ### 5.6 Many containers, and the two loading modes
 
-The status badge reads Fits (one container), "N containers" (blue), Impossible (a type that fits in no container; the rest is still packed and the badge's details say so), Too many (container cap), or Fix inputs. The side panel lists the containers with box counts and fill bars; clicking one, or the "Container 1 of N" switcher in the toolbar, selects what the 3D view shows. The legend shows placed / requested per type plus how many are in the selected container. The table lists every placement with its container number, and the Excel export gains a Containers sheet and a Container column.
+The status badge reads Fits (one container), "N containers" (blue), Impossible (a type that fits in no container; the rest is still packed and the badge's details say so), Too many (container cap), or Fix inputs. The side panel lists the containers with box counts and fill bars; clicking one, or the "Container 1 of N" switcher in the toolbar, selects what the 3D view shows. The legend shows placed / requested per type plus how many are in the selected container. The table lists every placement with its container number, and the Excel export writes one sheet per container.
 
 A Loading panel in the sidebar switches between the two modes of section 4.4, with a line under it saying what the chosen one does:
 
 - **Even** (the default): "Every container gets close to the same number of boxes." Computed in `derive()`, so the answer is on screen as soon as the inputs settle and no worker runs.
 - **Optimize**: "Fills each container as full as it can, so the last one may be nearly empty." `derive()` shows first fit straight away and `src/ui/optimizeClient.ts` starts `packMany` in a Web Worker with a run and time budget, mirroring progress into the status panel ("Optimizing container fill... 120 / 400 runs"). Any edit terminates the worker; the next settled recompute starts a fresh one.
 
-The mode is part of the scenario: it is saved with the draft, written to the Excel Summary sheet as "Loading mode", and read back on import (a workbook from before the modes loads as Even).
+The mode is part of the scenario: it is saved with the draft, written to each Excel container sheet as "Loading mode", and read back on import (a workbook from before the modes loads as Even).
 
 The legend counts the boxes of each type in the container on screen, and that count is an input. Lowering it leaves fewer for this container, so the rest move into the ones after it; raising it pulls them back, and the packer still only takes what fits, so a number the container cannot hold quietly settles at its capacity when the field is left. The counts live in `draft.allocation` together with the scenario shape they were typed for (`scenarioShape` in `src/ui/state.ts`): they survive quantity changes and reloads, and are ignored the moment the container, a box size, the unit or the mode changes. "Reset split" next to the container list hands the arrangement back to the mode. In `even` mode a hand-placed count wins over the rule that an even load is not worth an extra container, since the split is then the user's, not the app's.
 
@@ -390,9 +392,9 @@ The legend counts the boxes of each type in the container on screen, and that co
 
 Import (in the Boxes panel) accepts an .xlsx or .csv file. `src/ui/spreadsheet.ts` reads workbooks without a library: the ZIP is inflated with the browser's DecompressionStream, worksheets are parsed with regular expressions (shared strings, inline strings, formula results, booleans, errors), and CSV is split on the delimiter used in the first line with quoted fields. `src/ui/orderImport.ts` finds the header row (within the first 20 rows) by its column words, case, punctuation and units aside: Code (Type, Item, SKU, Name, Box), Qty (Quantity, Count, Pcs, Requested), Width / Depth / Height (W / D / H; Length and Width side by side mean first and second size, the app's own naming), and Color. Catalog codes are matched ignoring case and spaces and take their size from the catalog; other codes need all three sizes and become custom boxes; duplicate codes add up; every skipped row gets a one-line reason shown under the buttons. Sizes convert from the unit named in the header into the app's unit.
 
-Before anything is applied, the file is parsed once to fill a dialog (`src/ui/importDialog.ts`) that shows what was found, how many rows will be skipped and what the import replaces, and asks which unit the file's sizes are in: a spreadsheet rarely says, and the answer changes what every number means. The chosen unit becomes the app's unit, so the numbers on screen match the numbers in the file. A column header that names its own unit keeps it, and a workbook saved by contsim states its unit in the Summary sheet, so it is not asked about. Confirming parses the file again in that unit and applies it.
+Before anything is applied, the file is parsed once to fill a dialog (`src/ui/importDialog.ts`) that shows what was found, how many rows will be skipped and what the import replaces, and asks which unit the file's sizes are in: a spreadsheet rarely says, and the answer changes what every number means. The chosen unit becomes the app's unit, so the numbers on screen match the numbers in the file. A column header that names its own unit keeps it, and a workbook saved by contsim states its unit in its settings block, so it is not asked about. Confirming parses the file again in that unit and applies it.
 
-A workbook with Boxes and Summary sheets is the app's own export: the Boxes sheet is read as an order (with colors) and the Summary sheet restores the container type or custom size, the unit and the upright setting, so Export Excel doubles as save-and-load. "Order template" downloads a workbook with the columns, three example rows and a Guide sheet listing the rules (`ORDER_FORMAT_GUIDE`, also in README.md). Importing over a non-empty list asks for confirmation.
+A workbook whose sheets are named "Container N" is the app's own export, so Export Excel doubles as save-and-load. The settings block of the first sheet restores the container type or custom size, the payload, the unit and the loading mode; every sheet's box table is read as an order and the counts for a box are added up across the containers, which is the whole order back. Importing over a non-empty list asks for confirmation.
 
 ### 5.8 Drawing a lot of boxes
 
@@ -454,7 +456,7 @@ contsim/
       combobox.ts         searchable dropdown used by the box rows (5.5)
       example.ts          the order the app opens with
       spreadsheet.ts      reads .xlsx (ZIP + SpreadsheetML) and .csv into rows (5.7)
-      orderImport.ts      rows -> box rows, the export round trip, the order template (5.7)
+      orderImport.ts      rows -> box rows and the export round trip (5.7)
       importDialog.ts     asks what the file holds and which unit it uses (5.7)
       palette.ts          box type colors
       sidebar.ts          container preset and size, box rows with the catalog picker, export
@@ -463,7 +465,8 @@ contsim/
       stage.ts            center panel: toolbar (3D/Table, container toggle, layer slider, reset view)
       viewer3d.ts         three.js scene, on-demand rendering, hover dimming, layer visibility
       viewerMath.ts       pure helpers: core-to-scene mapping, layer predicate and prefix count, edge buffers, aspect-aware framing
-      report.ts           the Excel report: Summary, Boxes and Placements sheets from the state
+      report.ts           the Excel report: one sheet per container from the state
+      plan.ts             top and side views of a container as grids of coloured cells
       xlsx.ts             minimal SpreadsheetML writer (typed cells, header style, percent format)
       zip.ts              minimal ZIP writer (CRC-32, deflate via CompressionStream or stored)
       optimizeWorker.ts   runs packMany() with a run budget off the main thread
