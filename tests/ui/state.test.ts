@@ -146,10 +146,15 @@ describe('container presets', () => {
     const { containerType: _drop, ...legacy } = mixed()
     void _drop
     expect(parseDraft(JSON.stringify(legacy))?.containerType).toBe('custom')
-    expect(parseDraft(JSON.stringify({ ...mixed(), containerType: '60ft' }))).toBeNull()
-    expect(parseDraft(JSON.stringify({ ...mixed(), containerType: '40ft' }))?.containerType).toBe(
-      '40ft',
-    )
+    // A container the app no longer offers keeps the order and falls back to Custom.
+    expect(parseDraft(JSON.stringify({ ...mixed(), containerType: '60ft' }))).toMatchObject({
+      containerType: 'custom',
+      types: expect.any(Array),
+    })
+    expect(parseDraft(JSON.stringify({ ...mixed(), containerType: 7 }))).toBeNull()
+    expect(
+      parseDraft(JSON.stringify({ ...mixed(), containerType: '40ft-hc' }))?.containerType,
+    ).toBe('40ft-hc')
   })
 })
 
@@ -281,7 +286,7 @@ describe('edits', () => {
       unit: 'mm',
       weightUnit: 'kg',
       container: {
-        containerType: '40ft',
+        containerType: '40ft-hc',
         container: null,
         maxWeight: '',
         keepUpright: true,
@@ -289,7 +294,7 @@ describe('edits', () => {
       },
     })
     expect(preset).toMatchObject({
-      containerType: '40ft',
+      containerType: '40ft-hc',
       unit: 'mm',
       keepUpright: true,
       mode: 'optimize',
@@ -342,14 +347,14 @@ describe('hand-placed counts', () => {
     expect(allocationOf(pinned)).toEqual([{}, { '36': 3 }])
     expect(allocationOf(edits.setTypeField(pinned, '18', 'qty', '2'))).toEqual([{}, { '36': 3 }])
     // A different container, mode, unit or box size makes them meaningless.
-    expect(allocationOf(edits.setContainerType(pinned, '40ft'))).toBeUndefined()
+    expect(allocationOf(edits.setContainerType(pinned, '40ft-hc'))).toBeUndefined()
     expect(allocationOf(edits.setMode(pinned, 'optimize'))).toBeUndefined()
     expect(allocationOf(edits.setUnit(pinned, 'mm'))).toBeUndefined()
     expect(allocationOf(edits.setKeepUpright(pinned, true))).toBeUndefined()
     expect(allocationOf(edits.removeType(pinned, '18'))).toBeUndefined()
     expect(allocationOf(edits.setCustom(pinned, '18', 'Crate'))).toBeUndefined()
     // Still there, so the app can tell a stale split from none at all.
-    expect(edits.setContainerType(pinned, '40ft').allocation).not.toBeNull()
+    expect(edits.setContainerType(pinned, '40ft-hc').allocation).not.toBeNull()
   })
 
   it('are whole and never negative', () => {

@@ -327,7 +327,7 @@ test('the legend counts the boxes in the container on screen, and moves them', a
   await expect(reset).toBeHidden()
   // The catalog gives every cabinet a weight, so each container shows its load.
   await expect(page.locator('.container-row').first().locator('.container-meta').nth(1)).toHaveText(
-    '2,513 / 28,280 kg',
+    '2,513 / 11,000 kg',
   )
 
   // Fewer of the first cabinet here means more of it in the next container.
@@ -360,31 +360,31 @@ test('the payload limit fills containers by weight as well as by space', async (
   const payload = page.locator('[data-field="maxWeight"]')
   const load = (index: number) =>
     page.locator('.container-row').nth(index).locator('.container-meta').nth(1)
-  // A 20 ft container carries 28,280 kg, and the catalog gives every cabinet a weight.
-  await expect(payload).toHaveValue('28280')
+  // A 20 ft container is loaded to 11,000 kg, and the catalog weighs every cabinet.
+  await expect(payload).toHaveValue('11000')
   await expect(payload).toBeDisabled()
   await expect(weight(0)).toHaveValue('27')
-  await expect(page.locator('[data-stat="weight"]')).toHaveText('5,026 / 56,560 kg')
+  await expect(page.locator('[data-stat="weight"]')).toHaveText('5,026 / 22,000 kg')
 
-  // Heavy cabinets: the payload runs out before the space does.
+  // Heavy cabinets: the payload runs out long before the space does.
   for (const i of [0, 1, 2, 3, 4]) await weight(i).fill('400')
-  await expect(page.locator('[data-stat="containers"]')).toHaveText('3')
-  await expect(load(0)).toContainText('/ 28,280 kg')
+  await expect(page.locator('[data-stat="containers"]')).toHaveText('6')
+  await expect(load(0)).toContainText('/ 11,000 kg')
   const first = await load(0).innerText()
-  expect(Number(first.split('/')[0]!.replace(/[^0-9]/g, ''))).toBeLessThanOrEqual(28280)
+  expect(Number(first.split('/')[0]!.replace(/[^0-9]/g, ''))).toBeLessThanOrEqual(11000)
   await expect(page.locator('[data-stat="placed"]')).toHaveText('140 / 140')
 
   // One cabinet heavier than any container can carry.
   await weight(0).fill('40000')
   await expect(badge(page)).toHaveText('Impossible')
   await expect(page.locator('.message')).toHaveText(
-    '18 weighs 40,000 kg, more than the container may carry (28,280 kg).',
+    '18 weighs 40,000 kg, more than the container may carry (11,000 kg).',
   )
 
   // In pounds the same limit reads differently, and the weights come along.
   await weight(0).fill('27')
   await page.locator('[data-field="weightUnit"]').selectOption('lb')
-  await expect(payload).toHaveValue('62347')
+  await expect(payload).toHaveValue('24251')
   await expect(weight(0)).toHaveValue('59.525')
   await expect(
     page.locator('.container-row').first().locator('.container-meta').nth(1),
@@ -698,7 +698,7 @@ test('smoke: fits in one, grows into two, a bigger container takes it all, expor
   await expect(page.locator('.container-row')).toHaveCount(2)
   const placed = await page.locator('[data-stat="placed"]').textContent()
 
-  await page.locator('[data-field="containerType"]').selectOption('40ft')
+  await page.locator('[data-field="containerType"]').selectOption('40ft-hc')
   await expect(page.locator('[data-stat="containers"]')).toHaveText('1')
   await expect(page.locator('[data-stat="placed"]')).toHaveText(placed!)
 

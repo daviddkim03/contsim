@@ -188,7 +188,7 @@ describe('importWorkbook', () => {
     expect(r.imported.container).toEqual({
       containerType: '40ft-hc',
       container: null,
-      maxWeight: '26580',
+      maxWeight: '19000',
       keepUpright: true,
       mode: 'even',
     })
@@ -251,7 +251,7 @@ describe('readSummary', () => {
       readSummary(
         [
           ['Unit', 'mm'],
-          ['Container type', '20 ft high cube'],
+          ['Container type', '40 ft high cube'],
           ['Keep boxes upright', 'Yes'],
           ['Loading mode', 'Optimize'],
         ],
@@ -260,7 +260,7 @@ describe('readSummary', () => {
       ),
     ).toEqual({
       container: {
-        containerType: '20ft-hc',
+        containerType: '40ft-hc',
         container: null,
         maxWeight: '',
         keepUpright: true,

@@ -12,15 +12,7 @@ import {
 
 describe('container presets', () => {
   it('lists every preset once, then custom', () => {
-    expect(CONTAINER_TYPES).toEqual([
-      '10ft',
-      '20ft',
-      '20ft-hc',
-      '40ft',
-      '40ft-hc',
-      '45ft-hc',
-      'custom',
-    ])
+    expect(CONTAINER_TYPES).toEqual(['20ft', '40ft-hc', 'custom'])
     expect(new Set(CONTAINER_PRESETS.map((p) => p.id)).size).toBe(CONTAINER_PRESETS.length)
     expect(presetFor('custom')).toBeNull()
     expect(presetFor('20ft')?.name).toBe('20 ft')
@@ -43,18 +35,17 @@ describe('container presets', () => {
     expect(presetTexts(preset, 'ft')).toEqual({ l: '19.35', w: '7.72', h: '7.85' })
   })
 
-  it('carries a payload for every container, biggest for the 20 ft box', () => {
-    for (const preset of CONTAINER_PRESETS) expect(preset.payloadKg).toBeGreaterThan(1000)
-    // A 20 ft container carries the most: same gross limit, lightest of the big boxes.
-    expect(presetFor('20ft')!.payloadKg).toBeGreaterThan(presetFor('40ft')!.payloadKg)
-    expect(presetFor('10ft')!.payloadKg).toBeLessThan(presetFor('20ft')!.payloadKg)
-    expect(presetPayloadText(presetFor('20ft')!, 'kg')).toBe('28280')
-    expect(presetPayloadText(presetFor('20ft')!, 'lb')).toBe('62347')
+  it('carries the payload each container is loaded to', () => {
+    expect(presetFor('20ft')!.payloadKg).toBe(11000)
+    expect(presetFor('40ft-hc')!.payloadKg).toBe(19000)
+    expect(presetPayloadText(presetFor('20ft')!, 'kg')).toBe('11000')
+    expect(presetPayloadText(presetFor('20ft')!, 'lb')).toBe('24251')
+    expect(presetPayloadText(presetFor('40ft-hc')!, 'lb')).toBe('41888')
   })
 
-  it('makes high cubes taller and 40 ft twice as long as 20 ft', () => {
-    expect(presetFor('40ft-hc')!.mm.h).toBeGreaterThan(presetFor('40ft')!.mm.h)
-    expect(presetFor('40ft')!.mm.l).toBeGreaterThan(presetFor('20ft')!.mm.l * 2)
+  it('makes the high cube taller, and twice as long as the 20 ft box', () => {
+    expect(presetFor('40ft-hc')!.mm.h).toBeGreaterThan(presetFor('20ft')!.mm.h)
+    expect(presetFor('40ft-hc')!.mm.l).toBeGreaterThan(presetFor('20ft')!.mm.l * 2)
     for (const p of CONTAINER_PRESETS) expect(p.mm.w).toBe(2352)
   })
 })

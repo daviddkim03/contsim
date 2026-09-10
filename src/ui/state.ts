@@ -615,9 +615,13 @@ export function parseDraft(json: string): Draft | null {
     if (!WEIGHT_UNITS.includes(weightUnit as WeightUnit)) return null
     if (!Array.isArray(d.types)) return null
     if (!UNITS.includes(d.unit as Unit)) return null
-    // Drafts saved before container presets existed have no type: they are custom.
-    const containerType = d.containerType === undefined ? 'custom' : d.containerType
-    if (!CONTAINER_TYPES.includes(containerType as ContainerType)) return null
+    // Drafts saved before container presets existed have no type, and one that
+    // named a container the app no longer offers keeps its boxes: only the
+    // container falls back to Custom, where its size is on screen to correct.
+    const saved = d.containerType
+    const containerType =
+      saved !== undefined && CONTAINER_TYPES.includes(saved as ContainerType) ? saved : 'custom'
+    if (saved !== undefined && !isString(saved)) return null
     // Drafts saved before the modes existed get the default, like a new one.
     const mode = d.mode === undefined ? 'even' : d.mode
     if (!LOAD_MODES.includes(mode as LoadMode)) return null

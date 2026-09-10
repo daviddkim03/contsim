@@ -57,7 +57,7 @@ describe('buildReport', () => {
       'Container height (in)': 94.2,
       'Keep boxes upright': 'No',
       'Weight unit': 'kg',
-      'Payload per container': 28280,
+      'Payload per container': 11000,
       // The placeholder catalog gives every cabinet a weight.
       'Weight loaded': 5026,
       'Containers needed': result.containers.length,

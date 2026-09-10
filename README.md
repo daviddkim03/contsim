@@ -6,7 +6,7 @@ Pick a standard shipping container (or type a custom interior size), add cabinet
 
 ## Features
 
-- Container presets: 10 ft, 20 ft, 20 ft high cube, 40 ft, 40 ft high cube, 45 ft high cube (typical interior sizes, converted to the chosen unit), or a custom size.
+- Container presets: 20 ft and 40 ft high cube (typical interior sizes, converted to the chosen unit), or a custom size for anything else.
 - A searchable cabinet catalog behind every box row: type a code or a size such as `30x12x36`, pick, set the quantity. "Custom size" turns a row into a box with typed dimensions, and the star on that row saves it into the catalog for next time. **Clear** empties the whole list when the next order has nothing to do with this one.
 - As many containers as it takes: what does not fit in the first container goes to the next one of the same type. The status reads **Fits**, **2 containers**, **Impossible** (a box that fits in no container in any orientation; the rest is still packed), or **Too many**.
 - Two loading modes, chosen in the sidebar:
@@ -14,7 +14,7 @@ Pick a standard shipping container (or type a custom interior size), add cabinet
   - **Optimize** fills each container as full as it can before opening the next, which leaves the last one emptier. It runs in a Web Worker with a run and time budget; no button to press, the result appears when it is ready.
 - 3D view with orbit and zoom, a container switcher, a layer slider to look inside, hover highlighting per box type, and a table view of the placements. It stays smooth with a thousand boxes in a container: each box type is drawn in a couple of calls rather than two per box.
 - The legend counts what is in the container you are looking at, and the count is editable: lower it and those boxes move to the next container, raise it and they come back, up to what the container can actually hold. **Reset split** hands the arrangement back to the loading mode.
-- Weight: every container type carries its maximum payload (a 20 ft box takes 28,280 kg), and each cabinet can have a weight. A container is filled until it runs out of space **or** of payload, whichever comes first, so a heavy order needs more containers than the volume alone suggests. Weights come from the catalog, the import, or the box row.
+- Weight: each container has a payload (11,000 kg in a 20 ft box, 19,000 in a 40 ft high cube; a custom container takes any figure) and each cabinet can have a weight. A container is filled until it runs out of space **or** of payload, whichever comes first, so a heavy order needs more containers than the volume alone suggests. Weights come from the catalog, the import, or the box row.
 - Units: in, ft, cm, mm, m for sizes, kg or lb for weights. Every size is a real measurement, so switching a unit converts all of them. All packing math happens on exact integers.
 - **Import** an order from Excel or CSV: one row per cabinet with a code and a quantity, sizes only for boxes outside the catalog. contsim asks which unit the file's sizes are in, since a spreadsheet rarely says. An order template with a guide sheet is one click away, and the Excel export imports back too, container settings included. The scenario also persists in the browser.
 - **Export Excel** writes an .xlsx workbook with four sheets: a summary (status, container, totals), one row per container, one row per box type (requested, placed, left out, volumes), and one row per placed box (container, position, oriented size). Read and written by a small in-house reader and writer, no spreadsheet library.
