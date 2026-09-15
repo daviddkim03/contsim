@@ -5,18 +5,9 @@ export function againstWall(p: Point, s: Size, c: Container): boolean {
   return p.x === 0 || p.y === 0 || p.x + s.dx === c.l || p.y + s.dy === c.w
 }
 
-/**
- * True when a box at `p` would sit in the space above `under`: at or over its
- * top, with their footprints overlapping. Nothing may be above a fragile box.
- */
-export function above(p: Point, s: Size, under: Box): boolean {
-  return (
-    p.z >= under.z + under.dz &&
-    p.x < under.x + under.dx &&
-    under.x < p.x + s.dx &&
-    p.y < under.y + under.dy &&
-    under.y < p.y + s.dy
-  )
+/** True when the two boxes overlap seen from above, whatever their heights. */
+export function footprintsOverlap(a: Box, b: Box): boolean {
+  return a.x < b.x + b.dx && b.x < a.x + a.dx && a.y < b.y + b.dy && b.y < a.y + a.dy
 }
 
 /** Weight of one box of this type; unknown weights count as nothing. */
@@ -56,14 +47,7 @@ export function orientations({ l, w, h }: Dims, keepUpright: boolean): Size[] {
 
 /** Strict overlap: boxes that only touch (shared face, edge or corner) do not overlap. */
 export function overlaps(a: Box, b: Box): boolean {
-  return (
-    a.x < b.x + b.dx &&
-    b.x < a.x + a.dx &&
-    a.y < b.y + b.dy &&
-    b.y < a.y + a.dy &&
-    a.z < b.z + b.dz &&
-    b.z < a.z + a.dz
-  )
+  return footprintsOverlap(a, b) && a.z < b.z + b.dz && b.z < a.z + a.dz
 }
 
 /**

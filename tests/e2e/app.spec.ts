@@ -425,21 +425,6 @@ test('Clear empties the box list in one go, after asking', async ({ page }) => {
   await expect(clear).toBeEnabled()
 })
 
-test('the table view lists every placement in every container', async ({ page }) => {
-  await expect(page.locator('.stage-table')).toBeHidden()
-  await page.locator('[data-mode="table"]').click()
-  await expect(page.locator('.stage-table')).toBeVisible()
-  await expect(page.locator('.stage-3d')).toBeHidden()
-  await expect(page.locator('[data-role="container-switch"]')).toBeHidden()
-  await expect(page.locator('tbody tr')).toHaveCount(140)
-  await expect(page.locator('tbody tr').first()).toContainText('P249624')
-  await expect(page.locator('tbody tr').first().locator('td').first()).toHaveText('1')
-  await expect(page.locator('tbody tr').last().locator('td').first()).toHaveText('2')
-  await expect(page.locator('[data-role="summary"]')).toContainText('140 placed in 2 containers')
-  await page.locator('[data-mode="3d"]').click()
-  await expect(page.locator('.stage-3d canvas')).toBeVisible()
-})
-
 test('the container switcher and the container list select what the 3D view shows', async ({
   page,
 }) => {
@@ -519,12 +504,24 @@ test('the optimizer runs by itself after an edit and the result stays consistent
   )
 })
 
+test('fragile cabinets ride on top along the walls without costing a container', async ({
+  page,
+}) => {
+  await row(page, 0).locator('[data-field="fragile"]').check()
+  await expect(badge(page)).toHaveText('2 containers')
+  await expect(page.locator('.container-row').first()).toContainText('70 boxes · 71.8 %')
+  // Half of the 28 fragile cabinets in each container.
+  await expect(page.locator('.legend-row').first().locator('[data-field="here"]')).toHaveValue('14')
+  await page.locator('[data-action="next-container"]').click()
+  await expect(page.locator('.legend-row').first().locator('[data-field="here"]')).toHaveValue('14')
+  await expect(page.locator('.stage-3d')).toHaveAttribute('data-boxes', '70')
+})
+
 test('the Excel export imports back: order, container, units and fragility', async ({ page }) => {
   await page.locator('[data-field="containerType"]').selectOption('40ft-hc')
   await row(page, 1).locator('[data-field="fragile"]').check()
   await page.locator('[data-load-mode="optimize"]').click()
-  // Fragile cabinets need wall space, so the order no longer fits in one.
-  await expect(badge(page)).toHaveText('2 containers')
+  await expect(badge(page)).toHaveText('Fits')
   await expect(page.locator('[data-role="progress"]')).toBeHidden({ timeout: 15_000 })
   const downloadPromise = page.waitForEvent('download')
   await page.locator('[data-action="export-excel"]').click()
@@ -552,7 +549,7 @@ test('the Excel export imports back: order, container, units and fragility', asy
   await expect(page.locator('[data-field="containerType"]')).toHaveValue('40ft-hc')
   await expect(row(page, 1).locator('[data-field="fragile"]')).toBeChecked()
   await expect(page.locator('[data-load-mode="optimize"]')).toHaveAttribute('aria-pressed', 'true')
-  await expect(badge(page)).toHaveText('2 containers')
+  await expect(badge(page)).toHaveText('Fits')
   // The message stays until the next change, then goes away.
   await expect(hint(page)).toContainText('Imported 5 rows')
   await qty(page, 0).fill('29')

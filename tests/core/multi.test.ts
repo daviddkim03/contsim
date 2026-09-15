@@ -9,7 +9,15 @@ import { mulberry32 } from '../../src/core/ordering'
 import { pack } from '../../src/core/packer'
 import type { Scenario } from '../../src/core/types'
 import { exampleScenario, mixedScenario } from '../../src/scenarios'
-import { boxType, overfull, oversize, packingViolation, rotation, tiny } from './fixtures'
+import {
+  boxType,
+  fragileOrder,
+  overfull,
+  oversize,
+  packingViolation,
+  rotation,
+  tiny,
+} from './fixtures'
 
 const run = (s: Scenario, optimizeRuns = 0, maxContainers?: number) =>
   packMany(s.container, s.types, {
@@ -243,9 +251,26 @@ describe('packMany', () => {
       mode: 'even',
       optimizeRuns: 400,
     })
-    // Two passes over two containers; the optimizer never runs.
-    expect(a.runs).toBe(4)
+    // Three passes: the plain fill, the spread over its two containers, and
+    // the try at one container that shows two are needed. The optimizer never runs.
+    expect(a.runs).toBe(6)
     expect(b.containers.map((c) => c.placements)).toEqual(a.containers.map((c) => c.placements))
+  })
+
+  it('spreads over fewer containers than a plain fill when a balanced mix packs better', () => {
+    // Filled one at a time, the fragile order leaves a box or two for a third
+    // container; an even split of every type fits in two.
+    const plain = run(fragileOrder)
+    const even = packMany(fragileOrder.container, fragileOrder.types, { mode: 'even' })
+    expect(even.status).toBe('fits')
+    expect(even.containers).toHaveLength(2)
+    expect(even.containers.length).toBeLessThanOrEqual(plain.containers.length)
+    for (const c of even.containers) {
+      expect(c.placements).toHaveLength(70)
+      expect(c.placements.filter((p) => p.typeId === '18')).toHaveLength(14)
+    }
+    expect(even.stats.fill).toBeGreaterThan(0.7)
+    expect(multiViolation(fragileOrder, even)).toBeNull()
   })
 
   it('puts a pinned number of boxes in a container and moves the rest along', () => {

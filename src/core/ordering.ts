@@ -63,14 +63,14 @@ const byType: Key = [(it) => it.typeIndex, 'asc']
  * so ties keep box-type order and, within a type, insertion order.
  */
 export function orderItems(items: Item[], order: Ordering): Item[] {
-  // Fragile boxes go last whatever the ordering, so they land on top of the
-  // load rather than blocking the space above them.
-  return fragileLast(orderWithin(items, order))
+  // Fragile boxes go first whatever the ordering: they take their places
+  // along the walls before the load is packed around them (see pack).
+  return fragileFirst(orderWithin(items, order))
 }
 
 /** Stable, so each half keeps the order it was given. */
-function fragileLast(items: Item[]): Item[] {
-  return [...items.filter((it) => !it.fragile), ...items.filter((it) => it.fragile)]
+function fragileFirst(items: Item[]): Item[] {
+  return [...items.filter((it) => it.fragile), ...items.filter((it) => !it.fragile)]
 }
 
 function orderWithin(items: Item[], order: Ordering): Item[] {

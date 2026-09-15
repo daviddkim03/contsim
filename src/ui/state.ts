@@ -151,10 +151,8 @@ export interface Derived {
 
 /** Transient view settings. Not persisted, never trigger a recompute. */
 export interface ViewState {
-  mode: '3d' | 'table'
   /** Boxes whose bottom is above this height (core units) are hidden. null shows everything. */
   layer: number | null
-  showContainer: boolean
   /** Box type highlighted from the legend or the sidebar. */
   hoverTypeId: string | null
   /** Index of the container shown in 3D. Clamped to what exists when read. */
@@ -162,9 +160,7 @@ export interface ViewState {
 }
 
 export const DEFAULT_VIEW: ViewState = {
-  mode: '3d',
   layer: null,
-  showContainer: true,
   hoverTypeId: null,
   container: 0,
 }

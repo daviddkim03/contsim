@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   covered,
+  footprintsOverlap,
   insideContainer,
   orientations,
   overlaps,
@@ -106,6 +107,20 @@ describe('overlaps', () => {
 
   it('treats a box as overlapping itself', () => {
     expect(overlaps(unit, unit)).toBe(true)
+  })
+})
+
+describe('footprintsOverlap', () => {
+  const unit = box(0, 0, 0, 2, 2, 2)
+
+  it('ignores the heights: a box straight above another overlaps it', () => {
+    expect(footprintsOverlap(unit, box(1, 1, 5, 2, 2, 2))).toBe(true)
+    expect(overlaps(unit, box(1, 1, 5, 2, 2, 2))).toBe(false)
+  })
+
+  it('treats footprints that only touch as not overlapping', () => {
+    expect(footprintsOverlap(unit, box(2, 0, 0, 2, 2, 2))).toBe(false)
+    expect(footprintsOverlap(unit, box(2, 2, 0, 2, 2, 2))).toBe(false)
   })
 })
 

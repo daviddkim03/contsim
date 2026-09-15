@@ -274,15 +274,25 @@ export function packMany(
   const everything = (rest: Quantities, index: number) => shareOf(rest, rest, index)
   let containers = fillAll(everything)
   if (mode === 'even' && containers.length > 1) {
-    // Now that the container count is known, hand each one its share. An even
-    // load is not worth an extra container, so a wider spread is turned down -
-    // unless the caller pinned counts, in which case that split is the point.
-    const target = containers.length
-    const pinned = allocation.some((c) => c !== undefined)
-    const spread = fillAll((rest, done) =>
-      shareOf(evenShare(packable, rest, Math.max(1, target - done)), rest, done),
-    )
-    if (pinned || spread.length <= containers.length) containers = spread
+    const spreadOver = (target: number) =>
+      fillAll((rest, done) =>
+        shareOf(evenShare(packable, rest, Math.max(1, target - done)), rest, done),
+      )
+    if (allocation.some((c) => c !== undefined)) {
+      // Pinned counts are the point of the split, whatever it costs.
+      containers = spreadOver(containers.length)
+    } else {
+      // Now that the container count is known, hand each one its share. An
+      // even load is not worth an extra container, so a wider spread is
+      // turned down. A balanced mix often packs better than what a greedy
+      // fill leaves for its last container, though, so fewer containers are
+      // tried for as long as everything still fits.
+      for (let target = containers.length; target > 0; target--) {
+        const spread = spreadOver(target)
+        if (spread.length > target) break
+        containers = spread
+      }
+    }
   }
 
   const placedOf: Quantities = { ...requestedOf }

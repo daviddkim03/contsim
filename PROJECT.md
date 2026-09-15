@@ -26,6 +26,8 @@ Added on 2026-09-08: the import asks which unit the file's sizes are in and swit
 
 Added on 2026-09-10: fragility per box type in place of the global "keep upright" toggle (section 4.5), a sidebar without Load example, Order template or the standing hint line, and an Excel export rebuilt around one sheet per container with a top and a side view of the load (section 5.4).
 
+Added on 2026-09-15: fragile boxes reworked so they ride on top of the load along the walls instead of taking whatever wall space the load left (section 4.5), Even mode trying fewer containers than a plain fill needs (section 4.4), and a toolbar cut down to the container switcher, the layer slider and Reset view: the placement table and the outline toggle are gone (sections 5.2 and 5.6).
+
 Added on 2026-09-09: two loading modes, Even (the default, spreading the boxes so every container holds close to the same number) and Optimize (the previous behaviour), in sections 4.4 and 5.6; editable per-container counts in the legend (section 5.6); and weight, with a payload per container type and a weight per box (section 5.9).
 
 ## 1. Goals and non-goals
@@ -288,7 +290,7 @@ Notes:
 
 Two modes decide how the load is spread, both deterministic.
 
-- `mode: 'even'` (what the app opens with) spreads it. A first pass fills containers one at a time only to learn how many are needed; a second pass then hands each container `evenShare` of what is left: an equal slice of every type, whole boxes dealt out by largest remainder, so the containers end up with close to the same box count and the same mix. Anything a container cannot take rolls forward, so a tight fit shifts a few boxes later rather than failing. If the spread ends up needing more containers than plain filling did, the plain result is kept: an even load is not worth an extra container. It costs two passes, about twice a plain filling and far less than optimizing, so the UI runs it synchronously in `derive()` and there is nothing to wait for.
+- `mode: 'even'` (what the app opens with) spreads it. A first pass fills containers one at a time only to learn how many are needed; a second pass then hands each container `evenShare` of what is left: an equal slice of every type, whole boxes dealt out by largest remainder, so the containers end up with close to the same box count and the same mix. Anything a container cannot take rolls forward, so a tight fit shifts a few boxes later rather than failing. If the spread ends up needing more containers than plain filling did, the plain result is kept: an even load is not worth an extra container. The opposite happens too: a balanced mix often packs better than what a greedy fill leaves for its last container, so the spread is then tried over one container fewer, and again, for as long as everything still fits (the fragile example order fills one at a time into three containers and spreads into two). It costs a few passes, each about the price of a plain filling and far less than optimizing, so the UI runs it synchronously in `derive()` and there is nothing to wait for.
 - `mode: 'optimize'` fills each container as full as it can before opening the next. With `optimizeRuns > 0` each container receives the largest-volume subset that `optimize()` (section 4.3, objective keep-most-volume) can fit within the remaining run and time budget, which is shared across containers; when either runs out, the rest fall back to a single first-fit run. `onProgress` reports runs and finished containers and can stop the optimizing early, still returning a complete packing.
 
 In `optimize` mode the UI runs the plain variant synchronously in `derive()` (a few milliseconds) for instant feedback and the budgeted variant in a worker; `shownResult()` shows the worker's packing once it is in, unless it needs more containers or places fewer boxes, which greedy per-container filling can in principle do.
@@ -301,13 +303,18 @@ A box type marked `fragile` carries three rules through the packer at once:
 
 - **Upright.** Only the two rotations around the vertical axis, so its height stays its height.
 - **Against a wall.** The placement must touch one of the container's four vertical walls (`againstWall`), which keeps it out of the middle of the load.
-- **Nothing above.** No box may occupy the space over its footprint, at any height (`above`), not merely rest on it.
+- **Nothing above.** No box may occupy the space over its footprint, at any height, not merely rest on it.
 
-Fragile items are ordered last whatever the packing order (`fragileLast` in `ordering.ts`), so they land on top of what is already there rather than blocking the space above them.
+Fragile boxes go first, whatever the packing order (`fragileFirst` in `ordering.ts`), and each is reserved a place against a wall with its top at the roof (`findWallTop`). The load is then packed beneath and around them, which the reservation makes safe: nothing can be above a box that touches the roof. Once the load is in, each fragile box comes down to rest on the highest thing under its footprint, or on the floor (`Reservation`). Until 2026-09-15 fragile boxes went last instead, taking whatever wall space the load had left, which was usually none: the load filled every wall column to the roof, the fragile boxes spilled into extra containers and ringed the walls of a nearly empty one. The example order with its 28 fragile 18 in cabinets took three containers at 48 % that way; reserved first, they ride on top along the walls and the order fills two at 72 %, exactly as without the fragility.
 
-Candidate positions are the corners of placed boxes, which means a box can only ever reach the walls a placement happens to end on. For a box that must touch one, that throws away most of the container, so every candidate is also tried slid across to the far walls (`slidToWalls`). On a 20 ft container that took the number of upright 36 x 24 in cabinets that fit around the walls from 8 to 14, which is the perimeter capacity by hand.
+Two details make the ring worth something:
 
-Wall space is finite, so a lot of fragile boxes needs more containers: 28 fragile cabinets in the example order take 4 containers instead of 2. That is the cost of the rules, not a packing failure.
+- Candidate positions are the corners of placed boxes, which means a box can only ever reach the walls a placement happens to end on. For a box that must touch one, that throws away most of the container, so every candidate is also tried slid across to the far walls (`slidToWalls`).
+- Wall length is what limits fragile boxes, so at a candidate point the orientation that takes the least of it wins (`wallExtent`): a 1900 x 100 mm panel stands across the wall, not along it. An order of 412 such panels in 40 ft high cubes took 9 containers at 24 % with the panels lying along the walls; standing across them, 132 fit per container and the order takes 4.
+
+The load under a reservation must not leave the fragile box perched: what ends up highest under its footprint is what it comes to rest on, and the packer only lets a box rise there if the fragile box would still rest on at least half its footprint (`keepsSupport`, `MIN_SUPPORT`). Without that, a row of cabinets poking 34 mm under the wall strip left fragile boxes balanced on 14 % of their base, and once on 1 %.
+
+Wall space is still finite, so an order that is mostly fragile needs more containers than its volume suggests; that is the cost of the rules, not a packing failure.
 
 ## 5. UI
 
@@ -317,7 +324,7 @@ The takeoff-tool screenshot is the layout and style reference: dark left sidebar
 
 ```
 +-------------------+------------------------------------------------+---------------+
-| CONTAINER         |  [Hide container] [Layer: all v] [Units: in v] |  LEGEND       |
+| CONTAINER         |  [< Container 1 of 2 >] [Layer: all] [Reset]   |  LEGEND       |
 |  L [    ] W [    ]|                                                |  # Box A 10/10|
 |  H [    ]         |                                                |  # Box B  7/10|
 |                   |                                                |  # Box C  4/4 |
@@ -341,7 +348,7 @@ The takeoff-tool screenshot is the layout and style reference: dark left sidebar
   - Doesn't fit (amber): "Placed 21 of 24. No arrangement found for the rest; it may still be possible. Try Optimize or reduce quantities."
   - Impossible (red): the reason from 4.1, for example "Total box volume 1,920 exceeds container volume 1,728" or "Box B (48 x 48 x 100) does not fit in the container in any orientation".
   - Fix inputs (grey): some field is invalid.
-- 3D view: container as a wireframe over a light floor, boxes as solid colored cuboids with dark edges, one stable color per type. Hovering a legend row or a sidebar row highlights that type (everything else fades). The layer slider hides every box whose bottom is above the chosen height so the user can look inside. The camera follows the container until the user first orbits; after that it only moves on Reset view or when the container dims change. A 3D / Table toggle swaps the center panel for the placement list. Rendering is on demand, not a loop. Without WebGL the app falls back to the table.
+- 3D view: container as a wireframe over a light floor, boxes as solid colored cuboids with dark edges, one stable color per type. Hovering a legend row or a sidebar row highlights that type (everything else fades). The layer slider hides every box whose bottom is above the chosen height so the user can look inside. The camera follows the container until the user first orbits; after that it only moves on Reset view or when the container dims change. The container outline is always drawn. Rendering is on demand, not a loop. Without WebGL the center panel says so and the rest of the app still works. (A 3D / Table toggle with a placement list, and an Outline checkbox, existed until 2026-09-15; the table was the center panel before the 3D view and nobody needed it since.)
 - Unplaced boxes: shown in the legend as "7/10" and listed under the status.
 - Optimize: automatic, see 5.6. (Until 2026-09-03 this was a button with three objectives and an Apply / Discard popover proposing quantity reductions; with overflow going to another container, reductions no longer make sense.)
 - Persistence: the current scenario is saved to localStorage on every change. Export Excel downloads `contsim-packing.xlsx` (section 5.4) and Import reads it back, or reads an order sheet (section 5.7). (JSON import and export existed until 2026-09-03.)
@@ -377,7 +384,7 @@ The star on a custom row saves it into the catalog under its name (converted to 
 
 ### 5.6 Many containers, and the two loading modes
 
-The status badge reads Fits (one container), "N containers" (blue), Impossible (a type that fits in no container; the rest is still packed and the badge's details say so), Too many (container cap), or Fix inputs. The side panel lists the containers with box counts and fill bars; clicking one, or the "Container 1 of N" switcher in the toolbar, selects what the 3D view shows. The legend shows placed / requested per type plus how many are in the selected container. The table lists every placement with its container number, and the Excel export writes one sheet per container.
+The status badge reads Fits (one container), "N containers" (blue), Impossible (a type that fits in no container; the rest is still packed and the badge's details say so), Too many (container cap), or Fix inputs. The side panel lists the containers with box counts and fill bars; clicking one, or the "Container 1 of N" switcher in the toolbar, selects what the 3D view shows. The legend shows placed / requested per type plus how many are in the selected container, and the Excel export writes one sheet per container.
 
 A Loading panel in the sidebar switches between the two modes of section 4.4, with a line under it saying what the chosen one does:
 
@@ -402,7 +409,7 @@ A container can hold hundreds of boxes, and a mesh plus a wireframe per box mean
 
 Each type's boxes are sorted bottom-up when the packing is built, so the layer slider shows a prefix: moving it sets `mesh.count` and the edge draw range from a binary search (`visibleCount`), touching no buffers.
 
-The panels also stopped re-rendering on view changes that do not concern them: the legend and the placements table remember what they were drawn from and skip identical states, and the table does not build while the 3D view covers it. It caps at 500 rows and says so, pointing at the export for the rest; thousands of rows cost more to build than anyone can read.
+The panels also stopped re-rendering on view changes that do not concern them: the legend remembers what it was drawn from and skips identical states (so did the placement table, while it existed).
 
 Finally the optimizer takes a wall-clock budget as well as a run count. A packer run costs a fraction of a millisecond for a few large boxes and tens of milliseconds for hundreds of small ones, so a run count alone let a dense order spend five seconds of a core on every edit.
 
@@ -461,8 +468,7 @@ contsim/
       palette.ts          box type colors
       sidebar.ts          container preset and size, box rows with the catalog picker, export
       legend.ts           status panel, container list (selector) and legend
-      placementsTable.ts  placement list; the center panel until the 3D view exists
-      stage.ts            center panel: toolbar (3D/Table, container toggle, layer slider, reset view)
+      stage.ts            center panel: toolbar (container switcher, layer slider, reset view) over the 3D view
       viewer3d.ts         three.js scene, on-demand rendering, hover dimming, layer visibility
       viewerMath.ts       pure helpers: core-to-scene mapping, layer predicate and prefix count, edge buffers, aspect-aware framing
       report.ts           the Excel report: one sheet per container from the state
@@ -562,7 +568,7 @@ Approximate interior dims of standard dry containers, in inches (good enough for
 - Reacting to a view change (hover, layer, container): under a millisecond of work, whatever the box count.
 - Initial load: < 300 KB gzipped (three.js is most of it).
 
-Measured on 2026-09-08 with 900 boxes in one container, before and after section 5.8: orbiting 25 -> 119 fps, a layer-slider step 100 -> 0.3 ms, hovering a legend row 72 -> 0.1 ms, switching to the table with 2,000 placements 218 -> 55 ms, and the optimizer on a dense order 5.3 -> 1.8 s.
+Measured on 2026-09-08 with 900 boxes in one container, before and after section 5.8: orbiting 25 -> 119 fps, a layer-slider step 100 -> 0.3 ms, hovering a legend row 72 -> 0.1 ms, switching to the (since removed) table with 2,000 placements 218 -> 55 ms, and the optimizer on a dense order 5.3 -> 1.8 s.
 
 ## 11. Later ideas (v2, only if wanted)
 

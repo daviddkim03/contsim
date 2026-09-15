@@ -1,5 +1,5 @@
 import { insideContainer, overlaps } from '../../src/core/geometry'
-import type { BoxType, Container, PackResult, Scenario } from '../../src/core/types'
+import type { Box, BoxType, Container, PackResult, Scenario } from '../../src/core/types'
 
 export const boxType = (
   id: string,
@@ -35,6 +35,32 @@ export const perf300 = scenario({ l: 100, w: 100, h: 100 }, [
   boxType('c', 15, 15, 15, 50),
   boxType('d', 5, 5, 5, 100),
 ])
+/**
+ * The order the app opens with, in a 20 ft container in tenths of an inch,
+ * with the 18 in cabinets fragile. 140 cabinets that fill two containers to
+ * 72 % without the fragility; with it they used to take three at 48 %, the
+ * fragile ones ringing the walls of a nearly empty one.
+ */
+export const fragileOrder = scenario({ l: 2322, w: 926, h: 942 }, [
+  boxType('18', 180, 240, 345, 28, { fragile: true }),
+  boxType('36', 360, 240, 345, 28),
+  boxType('3036', 300, 120, 360, 42),
+  boxType('2442', 240, 120, 420, 28),
+  boxType('P249624', 240, 240, 960, 14),
+])
+
+/** The share of a box's footprint resting on box tops at its own height; 1 on the floor. */
+export function supportOf(p: Box, placed: readonly Box[]): number {
+  if (p.z === 0) return 1
+  let area = 0
+  for (const q of placed) {
+    if (q === p || q.z + q.dz !== p.z) continue
+    const dx = Math.min(p.x + p.dx, q.x + q.dx) - Math.max(p.x, q.x)
+    const dy = Math.min(p.y + p.dy, q.y + q.dy) - Math.max(p.y, q.y)
+    if (dx > 0 && dy > 0) area += dx * dy
+  }
+  return area / (p.dx * p.dy)
+}
 
 /**
  * Returns a description of the first packing invariant that `result` breaks
@@ -57,6 +83,7 @@ export function packingViolation(scenario: Scenario, result: PackResult): string
       const onAWall =
         p.x === 0 || p.y === 0 || p.x + p.dx === container.l || p.y + p.dy === container.w
       if (!onAWall) return `fragile but not against a wall: ${JSON.stringify(p)}`
+      if (supportOf(p, result.placements) < 0.5) return `fragile but perched: ${JSON.stringify(p)}`
       for (const other of result.placements) {
         if (other === p) continue
         const stacked =

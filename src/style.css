@@ -167,8 +167,7 @@ ul {
 }
 
 .panel h2,
-.side h2,
-.placements h2 {
+.side h2 {
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -834,61 +833,7 @@ button.primary:disabled {
   font-weight: 600;
 }
 
-/* Placements table -------------------------------------------------------- */
-
-.placements .panel-title {
-  margin-bottom: 12px;
-}
-
-.placements h2 {
-  color: var(--muted);
-}
-
-.table-wrap {
-  max-height: calc(100vh - 80px);
-  overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--panel-bg);
-}
-
-.table-wrap table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.table-wrap th,
-.table-wrap td {
-  padding: 6px 12px;
-  text-align: left;
-  border-bottom: 1px solid var(--border);
-  white-space: nowrap;
-}
-
-.table-wrap th {
-  position: sticky;
-  top: 0;
-  background: var(--panel-bg);
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-}
-
-.table-wrap .num {
-  width: 1%;
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
-.table-wrap .empty {
-  padding: 24px;
-  text-align: center;
-}
-
-/* Stage: 3D view, toolbar and table view ---------------------------------- */
+/* Stage: 3D view and toolbar ---------------------------------------------- */
 
 .stage {
   position: relative;
@@ -910,36 +855,6 @@ button.primary:disabled {
   background: rgba(255, 255, 255, 0.92);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
   backdrop-filter: blur(4px);
-}
-
-.segmented {
-  display: inline-flex;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-}
-
-.segmented button {
-  padding: 3px 10px;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-}
-
-.segmented button.active {
-  background: var(--fg);
-  color: #fff;
-}
-
-.stage-toolbar .check {
-  font-size: 12px;
-  color: var(--fg);
-}
-
-.stage-toolbar .check input {
-  width: 14px;
-  height: 14px;
 }
 
 .layer {
@@ -992,19 +907,9 @@ button.primary:disabled {
   background: var(--stage-bg);
 }
 
-.stage-3d,
-.stage-table {
+.stage-3d {
   position: absolute;
   inset: 0;
-}
-
-.stage-table {
-  overflow: auto;
-  padding: 58px 16px 16px;
-}
-
-.stage-table .table-wrap {
-  max-height: none;
 }
 
 .viewer-canvas {
@@ -1137,27 +1042,32 @@ button.primary:disabled {
   gap: 2px;
 }
 
-/* The loading mode, in the sidebar's colours rather than the stage's. */
-.sidebar .segmented {
+/* The loading mode: two buttons, one of them pressed. */
+.segmented {
   display: grid;
   grid-template-columns: 1fr 1fr;
   width: 100%;
-  border-color: var(--sidebar-input-border);
+  overflow: hidden;
+  border: 1px solid var(--sidebar-input-border);
+  border-radius: 6px;
   background: var(--sidebar-input);
 }
 
-.sidebar .segmented button {
+.segmented button {
   padding: 6px 10px;
+  border: 0;
+  background: transparent;
   color: var(--sidebar-muted);
   font: inherit;
+  cursor: pointer;
 }
 
-.sidebar .segmented button:hover {
+.segmented button:hover {
   color: var(--sidebar-fg);
 }
 
-.sidebar .segmented button.active,
-.sidebar .segmented button.active:hover {
+.segmented button.active,
+.segmented button.active:hover {
   background: var(--accent);
   color: var(--accent-fg);
   font-weight: 600;
@@ -1190,10 +1100,4 @@ button.ghost:disabled:hover {
 .stage-toolbar {
   flex-wrap: wrap;
   max-width: calc(100% - 24px);
-}
-
-@media (max-width: 900px) {
-  .stage-table {
-    padding-top: 100px;
-  }
 }

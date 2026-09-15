@@ -23,7 +23,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import type { BoxType, Container, Placement } from '../core'
 import { query } from './dom'
 import type { Panel } from './sidebar'
-import { shownContainer, type AppState, type Store } from './state'
+import { shownContainer, type AppState } from './state'
 import {
   EDGE_FLOATS_PER_BOX,
   EDGE_VERTICES_PER_BOX,
@@ -66,7 +66,7 @@ const UNIT_BOX = new BoxGeometry(1, 1, 1)
  * three.js view of the packing. Renders on demand (after input, state changes
  * and resizes) rather than in a loop, so an idle page costs nothing.
  */
-export function mountViewer(root: HTMLElement, store: Store): Viewer {
+export function mountViewer(root: HTMLElement): Viewer {
   root.innerHTML = `
     <div class="viewer-canvas"></div>
     <div class="viewer-overlay hint" hidden></div>
@@ -79,9 +79,7 @@ export function mountViewer(root: HTMLElement, store: Store): Viewer {
     renderer = new WebGLRenderer({ antialias: true })
   } catch {
     overlay.hidden = false
-    overlay.textContent =
-      'The 3D view needs WebGL, which this browser does not provide. The Table view still works.'
-    store.setView({ mode: 'table' })
+    overlay.textContent = 'The 3D view needs WebGL, which this browser does not provide.'
     return { render() {}, resetView() {} }
   }
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
@@ -238,7 +236,6 @@ export function mountViewer(root: HTMLElement, store: Store): Viewer {
   }
 
   function applyView({ view }: AppState): void {
-    containerGroup.visible = view.showContainer
     if (view.layer !== lastLayer) applyLayer(view.layer)
     for (const [typeId, m] of materials) {
       const dim = view.hoverTypeId !== null && view.hoverTypeId !== typeId

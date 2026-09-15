@@ -1,9 +1,9 @@
 import { findImpossibility } from './feasibility'
 import {
-  above,
   againstWall,
   boxWeight,
   covered,
+  footprintsOverlap,
   insideContainer,
   orientations,
   overlaps,
@@ -33,6 +33,11 @@ export const DEFAULT_PACK_OPTIONS: PackOptions = { order: 'volume-desc' }
  * orientation fits inside the container without overlapping a placed box.
  * A placed box contributes new candidate points at its corners, plus
  * "gravity-dropped" copies so boxes can fill holes and rest on real surfaces.
+ *
+ * Fragile boxes (section 4.5) come first and are reserved a place against a
+ * wall with their top at the roof, so the load is packed beneath them and
+ * nothing can be above them. Once the load is in, each one comes down to
+ * rest on whatever ended up under it.
  *
  * Deterministic: the same input always yields the same placements.
  * Throws on structurally invalid input; see validateScenario.
@@ -85,14 +90,19 @@ export function pack(
   const maxWeight = opts.maxWeight ?? 0
   let weight = 0
   const placements: Placement[] = []
-  /** Boxes that may carry nothing above them. */
-  const fragile: Box[] = []
+  /** Fragile boxes, reserved at the roof and lowered onto the load at the end. */
+  const reserved: Reservation[] = []
   const unplaced: Record<string, number> = {}
   let eps: Point[] = [{ x: 0, y: 0, z: 0 }]
   const sizesByDims = new Map<string, Size[]>()
   // Dims that found no position since the last placement. Nothing changed for
   // them, so identical boxes can be skipped without scanning again.
   const stuck = new Set<string>()
+  // Per candidate point, the fragile sizes that found no wall place from it.
+  // Boxes are only ever added, so those stay useless; see findWallTop. Keyed
+  // by identity: points survive the rebuilds of `eps`, and one Size list
+  // serves every box of a kind.
+  const noWallPlace = new Map<Point, Set<Size[]>>()
 
   for (const item of items) {
     // Fragility changes both the orientations and where a box may go, so it
@@ -115,7 +125,9 @@ export function pack(
       sizesByDims.set(key, sizes)
     }
 
-    const hit = findPosition(eps, sizes, container, placements, fragile, item.fragile)
+    const hit = item.fragile
+      ? findWallTop(eps, sizes, container, placements, noWallPlace)
+      : findPosition(eps, sizes, container, placements, reserved)
     if (!hit) {
       stuck.add(key)
       unplaced[item.typeId] = (unplaced[item.typeId] ?? 0) + 1
@@ -124,11 +136,23 @@ export function pack(
 
     const box: Placement = { typeId: item.typeId, ...hit.point, ...hit.size }
     placements.push(box)
-    if (item.fragile) fragile.push(box)
     weight += itemWeight
     stuck.clear()
-    eps = nextExtremePoints(eps, hit.point, box, placements, container)
+    // A reserved box only offers the floor beside it: nothing goes on top of
+    // it, and its own corners are up at the roof.
+    let candidates: Point[]
+    if (item.fragile) {
+      reserved.push({ box, top: 0, support: box.dx * box.dy })
+      candidates = groundPoints(box, placements)
+    } else {
+      for (const r of reserved) raiseSurface(r, box)
+      candidates = cornerPoints(box, placements)
+    }
+    eps = nextExtremePoints(eps, hit.point, box, candidates, placements, container)
   }
+
+  // The load is in: each fragile box comes down onto what is under it.
+  for (const r of reserved) r.box.z = r.top
 
   const placedVolume = placements.reduce((v, p) => v + sizeVolume(p), 0)
   return {
@@ -147,36 +171,139 @@ export function pack(
   }
 }
 
+/**
+ * A fragile box reserved at the roof, with the surface the load has built
+ * under it so far: the top of the highest box under its footprint (the floor
+ * to begin with) and how much of the footprint rests on boxes at that height.
+ */
+interface Reservation {
+  box: Placement
+  top: number
+  support: number
+}
+
+/** Half a footprint: what a box must at least rest on, so it never perches on a sliver. */
+const MIN_SUPPORT = 0.5
+
+/** The first candidate point, in order, where some orientation fits. */
 function findPosition(
   eps: Point[],
   sizes: Size[],
   container: Container,
   placed: Box[],
-  fragile: Box[],
-  wantsWall: boolean,
+  reserved: Reservation[],
 ): { point: Point; size: Size } | null {
   for (const point of eps) {
     for (const size of sizes) {
-      for (const candidate of wantsWall ? slidToWalls(point, size, container) : [point]) {
-        if (candidate.x < 0 || candidate.y < 0) continue
-        if (!insideContainer(candidate, size, container)) continue
-        if (wantsWall && !againstWall(candidate, size, container)) continue
-        if (overlapsAny(candidate, size, placed)) continue
-        // Nothing may sit above a fragile box, whatever it is.
-        if (fragile.some((f) => above(candidate, size, f))) continue
-        return { point: candidate, size }
-      }
+      if (!insideContainer(point, size, container)) continue
+      const box = asBox(point, size)
+      // The reservations before the rest: they are the oldest boxes, which
+      // the scan over everything placed reaches last, yet under them they
+      // are what a tall box runs into.
+      if (overlapsReserved(box, reserved) || overlapsAny(box, placed)) continue
+      if (!keepsSupport(box, reserved)) continue
+      return { point, size }
     }
   }
   return null
 }
 
+const asBox = (p: Point, s: Size): Box => ({ x: p.x, y: p.y, z: p.z, dx: s.dx, dy: s.dy, dz: s.dz })
+
+function overlapsReserved(box: Box, reserved: Reservation[]): boolean {
+  for (const r of reserved) if (overlaps(box, r.box)) return true
+  return false
+}
+
 /**
- * A candidate point and the same point slid across to the far walls. Candidate
- * points are the corners of placed boxes, so without this a box could only
- * ever reach the walls a placement happens to end on - which for a box that
- * must touch one (see BoxType.fragile) throws away half the container.
+ * True unless the box would leave a fragile box above it perched: whatever
+ * ends up highest under a reserved footprint is what the fragile box comes to
+ * rest on, and that must carry at least MIN_SUPPORT of the footprint.
  */
+function keepsSupport(box: Box, reserved: Reservation[]): boolean {
+  const top = box.z + box.dz
+  for (const r of reserved) {
+    if (top < r.top || !footprintsOverlap(box, r.box)) continue
+    const area = overlapArea(box, r.box)
+    const support = top === r.top ? r.support + area : area
+    if (support < MIN_SUPPORT * r.box.dx * r.box.dy) return false
+  }
+  return true
+}
+
+/** Records a placed box in the surface under a reservation it lies under. */
+function raiseSurface(r: Reservation, box: Box): void {
+  const top = box.z + box.dz
+  if (top < r.top || !footprintsOverlap(box, r.box)) return
+  const area = overlapArea(box, r.box)
+  if (top > r.top) {
+    r.top = top
+    r.support = area
+  } else {
+    r.support += area
+  }
+}
+
+function overlapArea(a: Box, b: Box): number {
+  const dx = Math.min(a.x + a.dx, b.x + b.dx) - Math.max(a.x, b.x)
+  const dy = Math.min(a.y + a.dy, b.y + b.dy) - Math.max(a.y, b.y)
+  return dx * dy
+}
+
+/**
+ * Where a fragile box is reserved: against one of the four walls, with its
+ * top at the roof so that nothing can be above it and the load packs beneath.
+ * Once the load is in it comes down onto the surface under it (Reservation).
+ * A candidate point only lends its floor-plan position, and since candidate
+ * points are the corners of placed boxes, the box is also tried slid across
+ * to the far walls - otherwise it could only reach the walls a placement
+ * happens to end on, which throws away most of the container.
+ *
+ * Wall space is what limits fragile boxes, so at a point the box goes in
+ * the orientation that takes the least of it: a thin panel stands across
+ * the wall, not along it.
+ *
+ * A point that offers a size no place will never offer one: the walls do
+ * not move and what is placed only grows. `dead` remembers those points per
+ * size, which is what keeps a ring of hundreds of boxes cheap to build.
+ */
+function findWallTop(
+  eps: Point[],
+  sizes: Size[],
+  container: Container,
+  placed: Box[],
+  dead: Map<Point, Set<Size[]>>,
+): { point: Point; size: Size } | null {
+  for (const point of eps) {
+    const deadHere = dead.get(point)
+    if (deadHere?.has(sizes)) continue
+    let best: { point: Point; size: Size; alongWall: number } | null = null
+    for (const size of sizes) {
+      const roof = { x: point.x, y: point.y, z: container.h - size.dz }
+      for (const candidate of slidToWalls(roof, size, container)) {
+        if (!insideContainer(candidate, size, container)) continue
+        if (!againstWall(candidate, size, container)) continue
+        if (overlapsAny(asBox(candidate, size), placed)) continue
+        const alongWall = wallExtent(candidate, size, container)
+        if (!best || alongWall < best.alongWall) best = { point: candidate, size, alongWall }
+      }
+    }
+    if (best) return { point: best.point, size: best.size }
+    if (deadHere) deadHere.add(sizes)
+    else dead.set(point, new Set([sizes]))
+  }
+  return null
+}
+
+/** How much of the wall it touches a box takes up; the shorter side in a corner. */
+function wallExtent(p: Point, s: Size, c: Container): number {
+  const onEndWall = p.x === 0 || p.x + s.dx === c.l
+  const onSideWall = p.y === 0 || p.y + s.dy === c.w
+  if (onEndWall && onSideWall) return Math.min(s.dx, s.dy)
+  return onEndWall ? s.dy : s.dx
+}
+
+/** A point and the same point slid across to the far walls. */
 function slidToWalls(p: Point, s: Size, c: Container): Point[] {
   return [
     p,
@@ -186,8 +313,7 @@ function slidToWalls(p: Point, s: Size, c: Container): Point[] {
   ]
 }
 
-function overlapsAny(p: Point, s: Size, placed: Box[]): boolean {
-  const candidate: Box = { x: p.x, y: p.y, z: p.z, dx: s.dx, dy: s.dy, dz: s.dz }
+function overlapsAny(candidate: Box, placed: Box[]): boolean {
   // Recently placed boxes sit at the frontier, so scanning backwards exits early more often.
   for (let i = placed.length - 1; i >= 0; i--) {
     if (overlaps(candidate, placed[i]!)) return true
@@ -210,33 +336,46 @@ function dropZ(p: Point, placed: Box[]): number {
 const pointKey = (p: Point) => `${p.x},${p.y},${p.z}`
 const byZYX = (a: Point, b: Point) => a.z - b.z || a.y - b.y || a.x - b.x
 
-/**
- * Candidate points after placing `box` at `used`: drop the used point and any
- * point now covered by the box, add the box's three corner points and the
- * gravity-dropped copies of the two floor-level ones, keep everything inside
- * the container, deduplicated and sorted lowest-first.
- */
-function nextExtremePoints(
-  eps: Point[],
-  used: Point,
-  box: Box,
-  placed: Box[],
-  container: Container,
-): Point[] {
-  const usedKey = pointKey(used)
-  const next = eps.filter((p) => pointKey(p) !== usedKey && !covered(p, box))
-  const keys = new Set(next.map(pointKey))
-
+/** The box's three corner points and the gravity-dropped copies of the two at its own height. */
+function cornerPoints(box: Box, placed: Box[]): Point[] {
   const right = { x: box.x + box.dx, y: box.y, z: box.z }
   const front = { x: box.x, y: box.y + box.dy, z: box.z }
   const top = { x: box.x, y: box.y, z: box.z + box.dz }
-  const candidates = [
+  return [
     right,
     front,
     top,
     { ...right, z: dropZ(right, placed) },
     { ...front, z: dropZ(front, placed) },
   ]
+}
+
+/** Only the gravity-dropped points beside the box. */
+function groundPoints(box: Box, placed: Box[]): Point[] {
+  const right = { x: box.x + box.dx, y: box.y, z: box.z }
+  const front = { x: box.x, y: box.y + box.dy, z: box.z }
+  return [
+    { ...right, z: dropZ(right, placed) },
+    { ...front, z: dropZ(front, placed) },
+  ]
+}
+
+/**
+ * Candidate points after placing `box` at `used`: drop the used point and any
+ * point now covered by the box, add the given candidates, keep everything
+ * inside the container, deduplicated and sorted lowest-first.
+ */
+function nextExtremePoints(
+  eps: Point[],
+  used: Point,
+  box: Box,
+  candidates: Point[],
+  placed: Box[],
+  container: Container,
+): Point[] {
+  const usedKey = pointKey(used)
+  const next = eps.filter((p) => pointKey(p) !== usedKey && !covered(p, box))
+  const keys = new Set(next.map(pointKey))
 
   for (const c of candidates) {
     if (c.x >= container.l || c.y >= container.w || c.z >= container.h) continue

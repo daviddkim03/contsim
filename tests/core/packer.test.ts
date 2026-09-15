@@ -6,12 +6,14 @@ import { mixedScenario } from '../../src/scenarios'
 import {
   boxType,
   cube27,
+  fragileOrder,
   overfull,
   oversize,
   packingViolation,
   perf300,
   pinwheel,
   rotation,
+  supportOf,
   tiny,
 } from './fixtures'
 
@@ -111,7 +113,7 @@ describe('pack', () => {
       { shuffle: 3 },
     ]
 
-    function randomScenario(seed: number): Scenario {
+    function randomScenario(seed: number, fragile = false): Scenario {
       const rand = mulberry32(seed)
       const int = (lo: number, hi: number) => lo + Math.floor(rand() * (hi - lo + 1))
       const container = { l: int(4, 30), w: int(4, 30), h: int(4, 30) }
@@ -122,6 +124,8 @@ describe('pack', () => {
           int(1, Math.ceil(container.w / 2)),
           int(1, Math.ceil(container.h / 2)),
           int(1, 15),
+          // About a third of the types, so most scenarios mix fragile and plain boxes.
+          { fragile: fragile && int(1, 3) === 1 },
         ),
       )
       return { container, types }
@@ -137,6 +141,18 @@ describe('pack', () => {
       }
       // Sanity check that the generator produces plenty of real packings, not only impossible ones.
       expect(packedSomething).toBeGreaterThan(50)
+    })
+
+    it('keeps every fragile box upright, on a wall, well supported and uncovered', () => {
+      let fragilePlaced = 0
+      for (let seed = 1; seed <= 200; seed++) {
+        const s = randomScenario(seed, true)
+        const r = run(s, orderings[seed % orderings.length])
+        expect(packingViolation(s, r), `seed ${seed}`).toBeNull()
+        const fragileIds = new Set(s.types.filter((t) => t.fragile).map((t) => t.id))
+        fragilePlaced += r.placements.filter((p) => fragileIds.has(p.typeId)).length
+      }
+      expect(fragilePlaced).toBeGreaterThan(100)
     })
   })
 
@@ -188,13 +204,61 @@ describe('pack', () => {
     expect(packingViolation({ container, types }, r)).toBeNull()
   })
 
-  it('places the fragile boxes last, so they end up on top of the load', () => {
+  it('lowers the fragile boxes onto the load packed beneath them', () => {
     const container = { l: 10, w: 10, h: 10 }
-    const types = [boxType('china', 2, 2, 2, 2, { fragile: true }), boxType('plain', 2, 2, 2, 8)]
-    // Fragile first in the type list, but the packer leaves them until last.
+    const types = [boxType('plain', 2, 2, 2, 8), boxType('china', 2, 2, 2, 2, { fragile: true })]
+    // Fragile last in the type list, but the packer reserves their places
+    // first: two corners, with the plain boxes filling the floor under them.
     const r = run({ container, types })
-    expect(r.placements.slice(-2).every((p) => p.typeId === 'china')).toBe(true)
+    const china = r.placements.filter((p) => p.typeId === 'china')
+    expect(china).toEqual([
+      { typeId: 'china', x: 0, y: 0, z: 2, dx: 2, dy: 2, dz: 2 },
+      { typeId: 'china', x: 8, y: 0, z: 2, dx: 2, dy: 2, dz: 2 },
+    ])
+    expect(r.placements.filter((p) => p.typeId === 'plain').every((p) => p.z === 0)).toBe(true)
     expect(packingViolation({ container, types }, r)).toBeNull()
+  })
+
+  it('leaves a fragile box on the floor when nothing goes under it', () => {
+    const container = { l: 10, w: 10, h: 10 }
+    const types = [boxType('china', 4, 4, 3, 1, { fragile: true })]
+    const r = run({ container, types })
+    expect(r.placements).toEqual([{ typeId: 'china', x: 0, y: 0, z: 0, dx: 4, dy: 4, dz: 3 }])
+  })
+
+  it('never lets the load leave a fragile box perched on a sliver', () => {
+    // Lying along the back wall, the beam would poke one unit under the
+    // fragile box and stand twice as tall as the block that fills the rest
+    // of its footprint, so it may not lie there: it stands beside the fragile
+    // box instead, and the fragile box comes down squarely onto the block.
+    const container = { l: 12, w: 5, h: 10 }
+    const types = [
+      boxType('beam', 9, 1, 6, 1),
+      boxType('block', 4, 4, 3, 1),
+      boxType('china', 4, 4, 2, 1, { fragile: true }),
+    ]
+    const r = run({ container, types })
+    expect(r.status).toBe('fits')
+    const china = r.placements.find((p) => p.typeId === 'china')!
+    expect(china).toMatchObject({ x: 0, y: 0, z: 3 })
+    expect(supportOf(china, r.placements)).toBe(1)
+    expect(r.placements.find((p) => p.typeId === 'beam')).toMatchObject({ x: 4, y: 0, dz: 9 })
+    expect(packingViolation({ container, types }, r)).toBeNull()
+  })
+
+  it('fits half the example order with its fragile cabinets on top along the walls', () => {
+    const half: Scenario = {
+      ...fragileOrder,
+      types: fragileOrder.types.map((t) => ({ ...t, qty: t.qty / 2 })),
+    }
+    const r = run(half)
+    expect(r.status).toBe('fits')
+    expect(r.stats.fill).toBeGreaterThan(0.7)
+    const fragile = r.placements.filter((p) => p.typeId === '18')
+    expect(fragile).toHaveLength(14)
+    // On top of the load, not on the floor with an empty column above.
+    expect(fragile.filter((p) => p.z > 0).length).toBeGreaterThan(7)
+    expect(packingViolation(half, r)).toBeNull()
   })
 
   it('reaches a far wall no placement happens to end on', () => {
