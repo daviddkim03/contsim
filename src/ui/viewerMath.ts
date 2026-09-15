@@ -55,28 +55,6 @@ export function writeBoxEdges(out: Float32Array, index: number, p: Placement): v
   }
 }
 
-/** A box is shown when its bottom is at or below the layer height. null shows everything. */
-export function isBelowLayer(p: { z: number }, layer: number | null): boolean {
-  return layer === null || p.z <= layer
-}
-
-/**
- * How many of `placements` the layer shows, given they are sorted by z. The
- * shown boxes are then always a prefix, so moving the slider is a matter of
- * drawing fewer of them rather than rebuilding anything.
- */
-export function visibleCount(placements: readonly { z: number }[], layer: number | null): number {
-  if (layer === null || placements.length === 0) return placements.length
-  let low = 0
-  let high = placements.length
-  while (low < high) {
-    const mid = (low + high) >> 1
-    if (placements[mid]!.z <= layer) low = mid + 1
-    else high = mid
-  }
-  return low
-}
-
 /** Vertical field of view of the viewer camera, in degrees. */
 export const FOV = 45
 

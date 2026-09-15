@@ -143,7 +143,7 @@ describe('pack', () => {
       expect(packedSomething).toBeGreaterThan(50)
     })
 
-    it('keeps every fragile box upright, on a wall, well supported and uncovered', () => {
+    it('keeps every fragile box upright, well supported and uncovered', () => {
       let fragilePlaced = 0
       for (let seed = 1; seed <= 200; seed++) {
         const s = randomScenario(seed, true)
@@ -191,16 +191,13 @@ describe('pack', () => {
     expect(r.stats).toMatchObject({ placed: 8, weight: 0 })
   })
 
-  it('keeps a fragile box upright, against a wall, with nothing above it', () => {
+  it('keeps a fragile box upright with nothing above it', () => {
     const container = { l: 10, w: 10, h: 10 }
     const types = [boxType('plain', 4, 4, 4, 6), boxType('china', 2, 2, 3, 4, { fragile: true })]
     const r = run({ container, types })
     const china = r.placements.filter((p) => p.typeId === 'china')
-    expect(china.length).toBeGreaterThan(0)
-    for (const p of china) {
-      expect(p.dz).toBe(3)
-      expect(p.x === 0 || p.y === 0 || p.x + p.dx === 10 || p.y + p.dy === 10).toBe(true)
-    }
+    expect(china).toHaveLength(4)
+    for (const p of china) expect(p.dz).toBe(3)
     expect(packingViolation({ container, types }, r)).toBeNull()
   })
 
@@ -208,12 +205,13 @@ describe('pack', () => {
     const container = { l: 10, w: 10, h: 10 }
     const types = [boxType('plain', 2, 2, 2, 8), boxType('china', 2, 2, 2, 2, { fragile: true })]
     // Fragile last in the type list, but the packer reserves their places
-    // first: two corners, with the plain boxes filling the floor under them.
+    // first, side by side from the corner, with the plain boxes filling the
+    // floor under them.
     const r = run({ container, types })
     const china = r.placements.filter((p) => p.typeId === 'china')
     expect(china).toEqual([
       { typeId: 'china', x: 0, y: 0, z: 2, dx: 2, dy: 2, dz: 2 },
-      { typeId: 'china', x: 8, y: 0, z: 2, dx: 2, dy: 2, dz: 2 },
+      { typeId: 'china', x: 2, y: 0, z: 2, dx: 2, dy: 2, dz: 2 },
     ])
     expect(r.placements.filter((p) => p.typeId === 'plain').every((p) => p.z === 0)).toBe(true)
     expect(packingViolation({ container, types }, r)).toBeNull()
@@ -246,7 +244,46 @@ describe('pack', () => {
     expect(packingViolation({ container, types }, r)).toBeNull()
   })
 
-  it('fits half the example order with its fragile cabinets on top along the walls', () => {
+  it('rests a long fragile box on a row of shorter ones placed together', () => {
+    // One brick carries 40 % of the pane, so it may not go under it alone;
+    // two side by side carry 80 % and are placed as a pair.
+    const container = { l: 10, w: 4, h: 10 }
+    const types = [boxType('pane', 10, 4, 2, 1, { fragile: true }), boxType('brick', 4, 4, 3, 2)]
+    const r = run({ container, types })
+    expect(r.status).toBe('fits')
+    expect(r.placements.filter((p) => p.typeId === 'brick')).toEqual([
+      { typeId: 'brick', x: 0, y: 0, z: 0, dx: 4, dy: 4, dz: 3 },
+      { typeId: 'brick', x: 4, y: 0, z: 0, dx: 4, dy: 4, dz: 3 },
+    ])
+    const pane = r.placements.find((p) => p.typeId === 'pane')!
+    expect(pane.z).toBe(3)
+    expect(supportOf(pane, r.placements)).toBe(0.8)
+    expect(packingViolation({ container, types }, r)).toBeNull()
+  })
+
+  it('leaves a box out rather than perch a fragile one on it alone', () => {
+    const container = { l: 10, w: 4, h: 10 }
+    const types = [boxType('pane', 10, 4, 2, 1, { fragile: true }), boxType('brick', 4, 4, 3, 1)]
+    const r = run({ container, types })
+    expect(r.status).toBe('not-found')
+    expect(r.placements).toEqual([{ typeId: 'pane', x: 0, y: 0, z: 0, dx: 10, dy: 4, dz: 2 }])
+    expect(r.unplaced).toEqual({ brick: 1 })
+  })
+
+  it('keeps a row under a fragile box within the payload', () => {
+    // One brick is within the payload, but the pair the pane needs is not.
+    const container = { l: 10, w: 4, h: 10 }
+    const types = [
+      boxType('pane', 10, 4, 2, 1, { fragile: true }),
+      { ...boxType('brick', 4, 4, 3, 2), weight: 60 },
+    ]
+    const r = pack(container, types, { maxWeight: 100 })
+    expect(r.placements.map((p) => p.typeId)).toEqual(['pane'])
+    expect(r.unplaced).toEqual({ brick: 2 })
+    expect(r.stats.weight).toBe(0)
+  })
+
+  it('fits half the example order with every fragile cabinet on top of the load', () => {
     const half: Scenario = {
       ...fragileOrder,
       types: fragileOrder.types.map((t) => ({ ...t, qty: t.qty / 2 })),
@@ -257,26 +294,19 @@ describe('pack', () => {
     const fragile = r.placements.filter((p) => p.typeId === '18')
     expect(fragile).toHaveLength(14)
     // On top of the load, not on the floor with an empty column above.
-    expect(fragile.filter((p) => p.z > 0).length).toBeGreaterThan(7)
+    expect(fragile.every((p) => p.z > 0)).toBe(true)
     expect(packingViolation(half, r)).toBeNull()
   })
 
-  it('reaches a far wall no placement happens to end on', () => {
-    // Rows of 3 deep boxes end at 3, 6 and 9, so the wall at y = 11 is only
-    // reachable by sliding a box across to it.
-    const container = { l: 20, w: 11, h: 4 }
-    const types = [boxType('china', 3, 3, 4, 14, { fragile: true })]
-    const r = run({ container, types })
-    expect(r.stats.placed).toBe(14)
-    expect(r.placements.some((p) => p.y + p.dy === 11)).toBe(true)
-    for (const wall of [
-      (p: { x: number }) => p.x === 0,
-      (p: { x: number; dx: number }) => p.x + p.dx === 20,
-      (p: { y: number }) => p.y === 0,
-      (p: { y: number; dy: number }) => p.y + p.dy === 11,
-    ]) {
-      expect(r.placements.some(wall)).toBe(true)
-    }
+  it('stands fragile panels the way most of them fit on the floor', () => {
+    // Upright and never stacked, panels are limited by floor area: 1900 x 100
+    // mm ones fill a 40 ft high cube 120 to a row across it (360 in all), not
+    // 15 to a row along it (345). The 412 of them used to take 9 containers.
+    const container = { l: 12032, w: 2352, h: 2698 }
+    const types = [boxType('panel', 770, 100, 1900, 412, { fragile: true })]
+    const r = pack(container, types, { skipChecks: true })
+    expect(r.stats.placed).toBe(360)
+    expect(r.placements.every((p) => p.dx === 100 && p.dy === 770 && p.dz === 1900)).toBe(true)
     expect(packingViolation({ container, types }, r)).toBeNull()
   })
 

@@ -26,12 +26,10 @@ import type { Panel } from './sidebar'
 import { shownContainer, type AppState } from './state'
 import {
   EDGE_FLOATS_PER_BOX,
-  EDGE_VERTICES_PER_BOX,
   FOV,
   boxCenter,
   boxSize,
   frameContainer,
-  visibleCount,
   writeBoxEdges,
 } from './viewerMath'
 
@@ -53,8 +51,6 @@ export interface Viewer extends Panel {
  * costs the same as one holding ten, which per-box objects did not.
  */
 interface TypeGroup {
-  /** Sorted bottom-up, so the layer slider shows a prefix of them. */
-  placements: Placement[]
   mesh: InstancedMesh
   edges: LineSegments
 }
@@ -114,7 +110,6 @@ export function mountViewer(root: HTMLElement): Viewer {
   let groups: TypeGroup[] = []
   let lastPlacements: Placement[] | null = null
   let lastContainer: Container | null = null
-  let lastLayer: number | null | undefined
   const matrix = new Matrix4()
 
   function materialFor(typeId: string, color: string): MeshLambertMaterial {
@@ -190,8 +185,6 @@ export function mountViewer(root: HTMLElement): Viewer {
     }
 
     groups = [...byType].map(([typeId, ofType]) => {
-      // Bottom-up, so the layer slider only has to draw fewer of them.
-      ofType.sort((a, b) => a.z - b.z)
       const mesh = new InstancedMesh(
         UNIT_BOX,
         materialFor(typeId, types.get(typeId)?.color ?? '#888888'),
@@ -217,26 +210,12 @@ export function mountViewer(root: HTMLElement): Viewer {
       mesh.instanceMatrix.needsUpdate = true
 
       boxesGroup.add(mesh, edges)
-      return { placements: ofType, mesh, edges }
+      return { mesh, edges }
     })
-    lastLayer = undefined
-  }
-
-  /** Draws only the boxes at or below the layer height. */
-  function applyLayer(layer: number | null): void {
-    let visible = 0
-    for (const group of groups) {
-      const shown = visibleCount(group.placements, layer)
-      group.mesh.count = shown
-      group.edges.geometry.setDrawRange(0, shown * EDGE_VERTICES_PER_BOX)
-      visible += shown
-    }
-    lastLayer = layer
-    root.dataset.boxes = String(visible)
+    root.dataset.boxes = String(placements.length)
   }
 
   function applyView({ view }: AppState): void {
-    if (view.layer !== lastLayer) applyLayer(view.layer)
     for (const [typeId, m] of materials) {
       const dim = view.hoverTypeId !== null && view.hoverTypeId !== typeId
       m.transparent = dim

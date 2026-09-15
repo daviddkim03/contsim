@@ -6,8 +6,6 @@ import {
   boxCenter,
   boxSize,
   frameContainer,
-  isBelowLayer,
-  visibleCount,
   writeBoxEdges,
 } from '../../src/ui/viewerMath'
 const p: Placement = { typeId: 'a', x: 10, y: 20, z: 30, dx: 4, dy: 6, dz: 8 }
@@ -16,15 +14,6 @@ describe('scene mapping', () => {
   it('maps core height to scene y and core width to scene z', () => {
     expect(boxCenter(p)).toEqual({ x: 12, y: 34, z: 23 })
     expect(boxSize(p)).toEqual({ x: 4, y: 8, z: 6 })
-  })
-})
-
-describe('isBelowLayer', () => {
-  it('shows a box when its bottom is at or below the layer, or when there is no layer', () => {
-    expect(isBelowLayer({ z: 30 }, null)).toBe(true)
-    expect(isBelowLayer({ z: 30 }, 30)).toBe(true)
-    expect(isBelowLayer({ z: 30 }, 29)).toBe(false)
-    expect(isBelowLayer({ z: 0 }, 0)).toBe(true)
   })
 })
 
@@ -56,28 +45,6 @@ describe('frameContainer', () => {
       (f.position.z - f.target.z) / dist(f),
     ]
     for (const [i, v] of dir(narrow).entries()) expect(v).toBeCloseTo(dir(wide)[i]!, 6)
-  })
-})
-
-describe('visibleCount', () => {
-  const at = (...zs: number[]) => zs.map((z) => ({ z }))
-
-  it('counts the boxes at or below the layer, given they are sorted', () => {
-    const boxes = at(0, 0, 12, 12, 24, 36)
-    expect(visibleCount(boxes, null)).toBe(6)
-    expect(visibleCount(boxes, 36)).toBe(6)
-    expect(visibleCount(boxes, 24)).toBe(5)
-    expect(visibleCount(boxes, 23)).toBe(4)
-    expect(visibleCount(boxes, 0)).toBe(2)
-    expect(visibleCount(boxes, -1)).toBe(0)
-    expect(visibleCount([], 5)).toBe(0)
-  })
-
-  it('agrees with isBelowLayer on every cut', () => {
-    const boxes = at(0, 0, 5, 5, 5, 11, 11, 40)
-    for (const layer of [-1, 0, 1, 5, 6, 11, 39, 40, 41]) {
-      expect(visibleCount(boxes, layer)).toBe(boxes.filter((b) => isBelowLayer(b, layer)).length)
-    }
   })
 })
 

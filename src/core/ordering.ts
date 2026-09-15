@@ -7,7 +7,7 @@ export interface Item {
   typeIndex: number
   dims: Dims
   volume: number
-  /** Upright, against a wall, nothing on top; see BoxType.fragile. */
+  /** Upright, nothing on top; see BoxType.fragile. */
   fragile: boolean
 }
 
@@ -64,7 +64,7 @@ const byType: Key = [(it) => it.typeIndex, 'asc']
  */
 export function orderItems(items: Item[], order: Ordering): Item[] {
   // Fragile boxes go first whatever the ordering: they take their places
-  // along the walls before the load is packed around them (see pack).
+  // at the roof before the load is packed beneath them (see pack).
   return fragileFirst(orderWithin(items, order))
 }
 

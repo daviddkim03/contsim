@@ -453,30 +453,6 @@ test('the container switcher and the container list select what the 3D view show
   await expect(stage).toHaveAttribute('data-boxes', '140')
 })
 
-test('the layer slider hides boxes above the chosen height', async ({ page }) => {
-  const slider = page.locator('[data-field="layer"]')
-  const label = page.locator('[data-role="layer-label"]')
-  await expect(progress(page)).toBeHidden()
-  await expect(label).toHaveText('Layer: all')
-  await expect(slider).toHaveAttribute('max', '942')
-
-  await slider.evaluate((el: HTMLInputElement) => {
-    el.value = '0'
-    el.dispatchEvent(new Event('input', { bubbles: true }))
-  })
-  await expect(label).toHaveText('Layer: up to 0 in')
-  const floorBoxes = Number(await page.locator('.stage-3d').getAttribute('data-boxes'))
-  expect(floorBoxes).toBeGreaterThan(0)
-  expect(floorBoxes).toBeLessThan(70)
-
-  await slider.evaluate((el: HTMLInputElement) => {
-    el.value = el.max
-    el.dispatchEvent(new Event('input', { bubbles: true }))
-  })
-  await expect(label).toHaveText('Layer: all')
-  await expect(page.locator('.stage-3d')).toHaveAttribute('data-boxes', '70')
-})
-
 test('hovering a legend or sidebar row highlights that box type', async ({ page }) => {
   const stage = page.locator('.stage-3d')
   await page.locator('.legend-row').nth(2).hover()
@@ -504,9 +480,7 @@ test('the optimizer runs by itself after an edit and the result stays consistent
   )
 })
 
-test('fragile cabinets ride on top along the walls without costing a container', async ({
-  page,
-}) => {
+test('fragile cabinets ride on top of the load without costing a container', async ({ page }) => {
   await row(page, 0).locator('[data-field="fragile"]').check()
   await expect(badge(page)).toHaveText('2 containers')
   await expect(page.locator('.container-row').first()).toContainText('70 boxes · 71.8 %')

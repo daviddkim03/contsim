@@ -857,25 +857,6 @@ button.primary:disabled {
   backdrop-filter: blur(4px);
 }
 
-.layer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--fg);
-  font-variant-numeric: tabular-nums;
-}
-
-.layer span {
-  min-width: 108px;
-}
-
-.layer input {
-  width: 90px;
-  margin: 0;
-  accent-color: var(--accent);
-}
-
 .stage-toolbar button.ghost {
   padding: 3px 8px;
   font-size: 12px;

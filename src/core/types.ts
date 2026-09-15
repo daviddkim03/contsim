@@ -43,10 +43,7 @@ export interface BoxType {
    * which is the same as weightless as far as the packer is concerned.
    */
   weight?: number
-  /**
-   * A fragile box travels upright, against a wall of the container rather
-   * than buried in the middle, and never carries another box on top.
-   */
+  /** A fragile box travels upright and never carries another box on top. */
   fragile?: boolean
 }
 

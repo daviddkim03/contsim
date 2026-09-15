@@ -48,7 +48,7 @@ export interface BoxTypeDraft {
   h: string
   /** Weight of one box in the draft's weight unit; blank means unknown. */
   weight: string
-  /** Upright, against a wall, nothing on top. */
+  /** Upright, nothing on top. */
   fragile: boolean
   qty: string
   color: string
@@ -151,8 +151,6 @@ export interface Derived {
 
 /** Transient view settings. Not persisted, never trigger a recompute. */
 export interface ViewState {
-  /** Boxes whose bottom is above this height (core units) are hidden. null shows everything. */
-  layer: number | null
   /** Box type highlighted from the legend or the sidebar. */
   hoverTypeId: string | null
   /** Index of the container shown in 3D. Clamped to what exists when read. */
@@ -160,7 +158,6 @@ export interface ViewState {
 }
 
 export const DEFAULT_VIEW: ViewState = {
-  layer: null,
   hoverTypeId: null,
   container: 0,
 }

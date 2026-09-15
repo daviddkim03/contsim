@@ -444,14 +444,14 @@ describe('Store', () => {
 describe('view state', () => {
   it('starts with defaults, patches without recompute, and survives edits', () => {
     const store = new Store(mixed(), null, 0)
-    expect(store.get().view).toEqual({ layer: null, hoverTypeId: null, container: 0 })
+    expect(store.get().view).toEqual({ hoverTypeId: null, container: 0 })
     let notifications = 0
     store.subscribe(() => notifications++)
-    store.setView({ layer: 48, hoverTypeId: 'pallet' })
+    store.setView({ hoverTypeId: 'pallet' })
     expect(notifications).toBe(1)
-    expect(store.get().view).toMatchObject({ layer: 48, hoverTypeId: 'pallet', container: 0 })
+    expect(store.get().view).toMatchObject({ hoverTypeId: 'pallet', container: 0 })
     store.edit((d) => edits.stepQty(d, 'pallet', 1))
-    expect(store.get().view.layer).toBe(48)
+    expect(store.get().view.hoverTypeId).toBe('pallet')
   })
 })
 

@@ -1,9 +1,4 @@
-import type { Box, Container, Dims, Point, Size } from './types'
-
-/** True when the box touches one of the container's four vertical walls. */
-export function againstWall(p: Point, s: Size, c: Container): boolean {
-  return p.x === 0 || p.y === 0 || p.x + s.dx === c.l || p.y + s.dy === c.w
-}
+import type { Box, Dims, Point, Size } from './types'
 
 /** True when the two boxes overlap seen from above, whatever their heights. */
 export function footprintsOverlap(a: Box, b: Box): boolean {

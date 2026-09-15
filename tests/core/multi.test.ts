@@ -16,6 +16,7 @@ import {
   oversize,
   packingViolation,
   rotation,
+  slabsAndBoxes,
   tiny,
 } from './fixtures'
 
@@ -258,16 +259,27 @@ describe('packMany', () => {
   })
 
   it('spreads over fewer containers than a plain fill when a balanced mix packs better', () => {
-    // Filled one at a time, the fragile order leaves a box or two for a third
-    // container; an even split of every type fits in two.
-    const plain = run(fragileOrder)
+    const plain = run(slabsAndBoxes)
+    expect(plain.containers).toHaveLength(3)
+    const even = packMany(slabsAndBoxes.container, slabsAndBoxes.types, { mode: 'even' })
+    expect(even.status).toBe('fits')
+    expect(even.containers).toHaveLength(2)
+    for (const c of even.containers) {
+      expect(c.placements.filter((p) => p.typeId === 'slab')).toHaveLength(2)
+      expect(c.placements.filter((p) => p.typeId === 'box')).toHaveLength(5)
+    }
+    expect(multiViolation(slabsAndBoxes, even)).toBeNull()
+  })
+
+  it('spreads the fragile order over two containers, as without the fragility', () => {
     const even = packMany(fragileOrder.container, fragileOrder.types, { mode: 'even' })
     expect(even.status).toBe('fits')
     expect(even.containers).toHaveLength(2)
-    expect(even.containers.length).toBeLessThanOrEqual(plain.containers.length)
     for (const c of even.containers) {
       expect(c.placements).toHaveLength(70)
-      expect(c.placements.filter((p) => p.typeId === '18')).toHaveLength(14)
+      const fragile = c.placements.filter((p) => p.typeId === '18')
+      expect(fragile).toHaveLength(14)
+      expect(fragile.every((p) => p.z > 0)).toBe(true)
     }
     expect(even.stats.fill).toBeGreaterThan(0.7)
     expect(multiViolation(fragileOrder, even)).toBeNull()

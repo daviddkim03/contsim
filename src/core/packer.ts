@@ -1,6 +1,5 @@
 import { findImpossibility } from './feasibility'
 import {
-  againstWall,
   boxWeight,
   covered,
   footprintsOverlap,
@@ -34,10 +33,12 @@ export const DEFAULT_PACK_OPTIONS: PackOptions = { order: 'volume-desc' }
  * A placed box contributes new candidate points at its corners, plus
  * "gravity-dropped" copies so boxes can fill holes and rest on real surfaces.
  *
- * Fragile boxes (section 4.5) come first and are reserved a place against a
- * wall with their top at the roof, so the load is packed beneath them and
- * nothing can be above them. Once the load is in, each one comes down to
- * rest on whatever ended up under it.
+ * Fragile boxes (section 4.5) come first and are each reserved a place with
+ * its top at the roof, so the load is packed beneath them and nothing can be
+ * above them. Once the load is in, each one comes down to rest on whatever
+ * ended up under it, which must carry at least half of it: a box that would
+ * leave a fragile box perched is only placed together with enough of its
+ * kind beside it to carry the fragile box between them.
  *
  * Deterministic: the same input always yields the same placements.
  * Throws on structurally invalid input; see validateScenario.
@@ -89,6 +90,10 @@ export function pack(
   const weights = new Map(types.map((t) => [t.id, boxWeight(t)]))
   const maxWeight = opts.maxWeight ?? 0
   let weight = 0
+  /** Boxes of each type still to come, which a row under a fragile box may draw on. */
+  const remaining = new Map(types.map((t) => [t.id, t.qty]))
+  /** Boxes of each type placed ahead of their turn, in such a row. */
+  const placedAhead = new Map<string, number>()
   const placements: Placement[] = []
   /** Fragile boxes, reserved at the roof and lowered onto the load at the end. */
   const reserved: Reservation[] = []
@@ -98,13 +103,19 @@ export function pack(
   // Dims that found no position since the last placement. Nothing changed for
   // them, so identical boxes can be skipped without scanning again.
   const stuck = new Set<string>()
-  // Per candidate point, the fragile sizes that found no wall place from it.
-  // Boxes are only ever added, so those stay useless; see findWallTop. Keyed
-  // by identity: points survive the rebuilds of `eps`, and one Size list
-  // serves every box of a kind.
-  const noWallPlace = new Map<Point, Set<Size[]>>()
+  // Per candidate point, the fragile sizes that found no place over it.
+  // Boxes are only ever added, so those stay useless; see findRoofPlace.
+  // Keyed by identity: points survive the rebuilds of `eps`, and one Size
+  // list serves every box of a kind.
+  const noRoofPlace = new Map<Point, Set<Size[]>>()
 
   for (const item of items) {
+    const ahead = placedAhead.get(item.typeId) ?? 0
+    if (ahead > 0) {
+      placedAhead.set(item.typeId, ahead - 1)
+      continue
+    }
+    remaining.set(item.typeId, remaining.get(item.typeId)! - 1)
     // Fragility changes both the orientations and where a box may go, so it
     // belongs in the key that caches sizes and remembers dead ends.
     const key = `${item.dims.l},${item.dims.w},${item.dims.h},${item.fragile}`
@@ -122,33 +133,50 @@ export function pack(
     let sizes = sizesByDims.get(key)
     if (!sizes) {
       sizes = orientations(item.dims, item.fragile)
+      if (item.fragile) sizes = byFloorCount(sizes, container)
       sizesByDims.set(key, sizes)
     }
 
-    const hit = item.fragile
-      ? findWallTop(eps, sizes, container, placements, noWallPlace)
-      : findPosition(eps, sizes, container, placements, reserved)
-    if (!hit) {
+    let group: Box[] | null
+    if (item.fragile) {
+      const roof = findRoofPlace(eps, sizes, container, placements, noRoofPlace)
+      group = roof && [roof]
+    } else {
+      // How many more of its kind a row may take: what is left of the type
+      // and, with a payload, what is left of that.
+      const spare =
+        maxWeight > 0 && itemWeight > 0
+          ? Math.min(remaining.get(item.typeId)!, Math.floor((maxWeight - weight) / itemWeight) - 1)
+          : remaining.get(item.typeId)!
+      group = findPosition(eps, sizes, container, placements, reserved, spare)
+    }
+    if (!group) {
       stuck.add(key)
       unplaced[item.typeId] = (unplaced[item.typeId] ?? 0) + 1
       continue
     }
 
-    const box: Placement = { typeId: item.typeId, ...hit.point, ...hit.size }
-    placements.push(box)
-    weight += itemWeight
-    stuck.clear()
-    // A reserved box only offers the floor beside it: nothing goes on top of
-    // it, and its own corners are up at the roof.
-    let candidates: Point[]
-    if (item.fragile) {
-      reserved.push({ box, top: 0, support: box.dx * box.dy })
-      candidates = groundPoints(box, placements)
-    } else {
-      for (const r of reserved) raiseSurface(r, box)
-      candidates = cornerPoints(box, placements)
+    for (const box of group) {
+      const placement: Placement = { typeId: item.typeId, ...box }
+      placements.push(placement)
+      weight += itemWeight
+      // A reserved box only offers the floor beside it: nothing goes on top
+      // of it, and its own corners are up at the roof.
+      let candidates: Point[]
+      if (item.fragile) {
+        reserved.push({ box: placement, top: 0, support: box.dx * box.dy })
+        candidates = groundPoints(placement, placements)
+      } else {
+        for (const r of reserved) raiseSurface(r, placement)
+        candidates = cornerPoints(placement, placements)
+      }
+      eps = nextExtremePoints(eps, box, placement, candidates, placements, container)
     }
-    eps = nextExtremePoints(eps, hit.point, box, candidates, placements, container)
+    stuck.clear()
+    if (group.length > 1) {
+      remaining.set(item.typeId, remaining.get(item.typeId)! - (group.length - 1))
+      placedAhead.set(item.typeId, (placedAhead.get(item.typeId) ?? 0) + group.length - 1)
+    }
   }
 
   // The load is in: each fragile box comes down onto what is under it.
@@ -185,14 +213,19 @@ interface Reservation {
 /** Half a footprint: what a box must at least rest on, so it never perches on a sliver. */
 const MIN_SUPPORT = 0.5
 
-/** The first candidate point, in order, where some orientation fits. */
+/**
+ * The box at the first candidate point, in order, where some orientation
+ * fits, with any more of its kind it takes beside it (see `supported`), at
+ * most `spare` of them.
+ */
 function findPosition(
   eps: Point[],
   sizes: Size[],
   container: Container,
   placed: Box[],
   reserved: Reservation[],
-): { point: Point; size: Size } | null {
+  spare: number,
+): Box[] | null {
   for (const point of eps) {
     for (const size of sizes) {
       if (!insideContainer(point, size, container)) continue
@@ -201,8 +234,8 @@ function findPosition(
       // the scan over everything placed reaches last, yet under them they
       // are what a tall box runs into.
       if (overlapsReserved(box, reserved) || overlapsAny(box, placed)) continue
-      if (!keepsSupport(box, reserved)) continue
-      return { point, size }
+      const group = supported(box, reserved, placed, spare)
+      if (group) return group
     }
   }
   return null
@@ -216,19 +249,50 @@ function overlapsReserved(box: Box, reserved: Reservation[]): boolean {
 }
 
 /**
- * True unless the box would leave a fragile box above it perched: whatever
- * ends up highest under a reserved footprint is what the fragile box comes to
- * rest on, and that must carry at least MIN_SUPPORT of the footprint.
+ * The box alone, unless it would leave a fragile box above it perched:
+ * whatever ends up highest under a reserved footprint is what the fragile
+ * box comes to rest on, and that must carry at least MIN_SUPPORT of the
+ * footprint. A box that carries less on its own is still placed if it lies
+ * entirely under the footprint and enough copies of it fit in rows beside
+ * it there to carry half between them, as short boxes under a long fragile
+ * one do; the copies are returned with it. Null when neither works.
  */
-function keepsSupport(box: Box, reserved: Reservation[]): boolean {
+function supported(box: Box, reserved: Reservation[], placed: Box[], spare: number): Box[] | null {
   const top = box.z + box.dz
+  let perched: Reservation | null = null
   for (const r of reserved) {
     if (top < r.top || !footprintsOverlap(box, r.box)) continue
     const area = overlapArea(box, r.box)
     const support = top === r.top ? r.support + area : area
-    if (support < MIN_SUPPORT * r.box.dx * r.box.dy) return false
+    if (support >= MIN_SUPPORT * r.box.dx * r.box.dy) continue
+    // A box entirely under one footprint lies under no other.
+    if (!within(box, r.box)) return null
+    perched = r
   }
-  return true
+  if (!perched) return [box]
+
+  const f = perched.box
+  const target = MIN_SUPPORT * f.dx * f.dy
+  const group = [box]
+  let support = box.dx * box.dy
+  for (let y = box.y; support < target && y + box.dy <= f.y + f.dy; y += box.dy) {
+    const first = y === box.y ? box.x + box.dx : box.x
+    for (let x = first; support < target && x + box.dx <= f.x + f.dx; x += box.dx) {
+      if (group.length > spare) return null
+      const copy = { ...box, x, y }
+      // Something lower is in the way (nothing under the footprint reaches
+      // `top` yet); the row goes on past it.
+      if (overlapsAny(copy, placed)) continue
+      group.push(copy)
+      support += box.dx * box.dy
+    }
+  }
+  return support >= target ? group : null
+}
+
+/** True when a lies inside b seen from above. */
+function within(a: Box, b: Box): boolean {
+  return a.x >= b.x && a.x + a.dx <= b.x + b.dx && a.y >= b.y && a.y + a.dy <= b.y + b.dy
 }
 
 /** Records a placed box in the surface under a reservation it lies under. */
@@ -251,66 +315,47 @@ function overlapArea(a: Box, b: Box): number {
 }
 
 /**
- * Where a fragile box is reserved: against one of the four walls, with its
- * top at the roof so that nothing can be above it and the load packs beneath.
- * Once the load is in it comes down onto the surface under it (Reservation).
- * A candidate point only lends its floor-plan position, and since candidate
- * points are the corners of placed boxes, the box is also tried slid across
- * to the far walls - otherwise it could only reach the walls a placement
- * happens to end on, which throws away most of the container.
+ * Where a fragile box is reserved: over a candidate point, with its top at
+ * the roof so that nothing can be above it and the load packs beneath. Once
+ * the load is in it comes down onto the surface under it (Reservation). The
+ * candidate point only lends its floor-plan position.
  *
- * Wall space is what limits fragile boxes, so at a point the box goes in
- * the orientation that takes the least of it: a thin panel stands across
- * the wall, not along it.
- *
- * A point that offers a size no place will never offer one: the walls do
- * not move and what is placed only grows. `dead` remembers those points per
- * size, which is what keeps a ring of hundreds of boxes cheap to build.
+ * A point that offers a size no place will never offer one: what is placed
+ * only grows. `dead` remembers those points per size, which is what keeps a
+ * floor of hundreds of boxes cheap to build.
  */
-function findWallTop(
+function findRoofPlace(
   eps: Point[],
   sizes: Size[],
   container: Container,
   placed: Box[],
   dead: Map<Point, Set<Size[]>>,
-): { point: Point; size: Size } | null {
+): Box | null {
   for (const point of eps) {
     const deadHere = dead.get(point)
     if (deadHere?.has(sizes)) continue
-    let best: { point: Point; size: Size; alongWall: number } | null = null
     for (const size of sizes) {
       const roof = { x: point.x, y: point.y, z: container.h - size.dz }
-      for (const candidate of slidToWalls(roof, size, container)) {
-        if (!insideContainer(candidate, size, container)) continue
-        if (!againstWall(candidate, size, container)) continue
-        if (overlapsAny(asBox(candidate, size), placed)) continue
-        const alongWall = wallExtent(candidate, size, container)
-        if (!best || alongWall < best.alongWall) best = { point: candidate, size, alongWall }
-      }
+      if (!insideContainer(roof, size, container)) continue
+      const box = asBox(roof, size)
+      if (overlapsAny(box, placed)) continue
+      return box
     }
-    if (best) return { point: best.point, size: best.size }
     if (deadHere) deadHere.add(sizes)
     else dead.set(point, new Set([sizes]))
   }
   return null
 }
 
-/** How much of the wall it touches a box takes up; the shorter side in a corner. */
-function wallExtent(p: Point, s: Size, c: Container): number {
-  const onEndWall = p.x === 0 || p.x + s.dx === c.l
-  const onSideWall = p.y === 0 || p.y + s.dy === c.w
-  if (onEndWall && onSideWall) return Math.min(s.dx, s.dy)
-  return onEndWall ? s.dy : s.dx
-}
-
-/** A point and the same point slid across to the far walls. */
-function slidToWalls(p: Point, s: Size, c: Container): Point[] {
-  return [
-    p,
-    { ...p, x: c.l - s.dx },
-    { ...p, y: c.w - s.dy },
-    { x: c.l - s.dx, y: c.w - s.dy, z: p.z },
-  ]
+/**
+ * Fragile boxes cannot stack, so floor area is what limits them, and the
+ * orientation that fits the most of them on the floor goes first: a 1900 x
+ * 100 mm panel stands across the container, not along it. Stable, so equal
+ * counts keep the natural orientation first.
+ */
+function byFloorCount(sizes: Size[], c: Container): Size[] {
+  const count = (s: Size) => Math.floor(c.l / s.dx) * Math.floor(c.w / s.dy)
+  return [...sizes].sort((a, b) => count(b) - count(a))
 }
 
 function overlapsAny(candidate: Box, placed: Box[]): boolean {

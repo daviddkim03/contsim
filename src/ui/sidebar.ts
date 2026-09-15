@@ -361,7 +361,7 @@ export function mountSidebar(root: HTMLElement, store: Store): Panel {
         </div>
       </div>
       <div class="row-bottom">
-        <label class="check row-fragile" title="Upright, against a wall, nothing on top">
+        <label class="check row-fragile" title="Upright, nothing on top">
           <input type="checkbox" data-field="fragile">
           <span>Fragile</span>
         </label>

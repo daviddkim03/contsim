@@ -39,7 +39,7 @@ export const perf300 = scenario({ l: 100, w: 100, h: 100 }, [
  * The order the app opens with, in a 20 ft container in tenths of an inch,
  * with the 18 in cabinets fragile. 140 cabinets that fill two containers to
  * 72 % without the fragility; with it they used to take three at 48 %, the
- * fragile ones ringing the walls of a nearly empty one.
+ * fragile ones ringing the walls of a nearly empty one, and four before that.
  */
 export const fragileOrder = scenario({ l: 2322, w: 926, h: 942 }, [
   boxType('18', 180, 240, 345, 28, { fragile: true }),
@@ -47,6 +47,15 @@ export const fragileOrder = scenario({ l: 2322, w: 926, h: 942 }, [
   boxType('3036', 300, 120, 360, 42),
   boxType('2442', 240, 120, 420, 28),
   boxType('P249624', 240, 240, 960, 14),
+])
+/**
+ * Filled one at a time, the four slabs take the first container on their own
+ * and the ten boxes left over do not fit in a second; two slabs and five
+ * boxes per container do.
+ */
+export const slabsAndBoxes = scenario({ l: 4, w: 7, h: 6 }, [
+  boxType('slab', 4, 5, 2, 4),
+  boxType('box', 1, 4, 4, 10),
 ])
 
 /** The share of a box's footprint resting on box tops at its own height; 1 on the floor. */
@@ -80,9 +89,6 @@ export function packingViolation(scenario: Scenario, result: PackResult): string
     }
     if (t.fragile) {
       if (p.dz !== t.dims.h) return `fragile but not upright: ${JSON.stringify(p)}`
-      const onAWall =
-        p.x === 0 || p.y === 0 || p.x + p.dx === container.l || p.y + p.dy === container.w
-      if (!onAWall) return `fragile but not against a wall: ${JSON.stringify(p)}`
       if (supportOf(p, result.placements) < 0.5) return `fragile but perched: ${JSON.stringify(p)}`
       for (const other of result.placements) {
         if (other === p) continue
